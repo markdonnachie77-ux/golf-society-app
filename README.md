@@ -1,6 +1,6 @@
 # Golf Society & Handicap Tracker
 
-Status: **Phase 1–6 complete** (of the 7-phase roadmap in `SPEC.md`).
+Status: **All 7 phases of the roadmap in `SPEC.md` are complete.**
 
 - ✅ Phase 1 — Next.js (App Router, TS) project skeleton, Tailwind + Shadcn-style
   UI primitives, full Supabase SQL migrations for every table, hand-written
@@ -31,7 +31,12 @@ Status: **Phase 1–6 complete** (of the 7-phase roadmap in `SPEC.md`).
   `players.current_handicap` update, and the `handicap_history` insert all
   happen in one transaction, and re-check the scorecard is still pending
   before acting (so two admins can't double-approve the same round).
-- ⏳ Phase 7 — player profile & handicap timeline chart. Not yet built.
+- ✅ Phase 7 — player profiles (`/players`, `/players/[id]`) with a
+  handicap timeline chart (recharts) that back-calculates a sensible
+  starting point from the first approved round, and a society-wide rounds
+  feed (`/rounds`) showing every logged round with a status badge. See
+  "A deliberate access-control change" below — this phase relaxed who can
+  view a scorecard's detail page.
 
 ## 1. Install dependencies
 
@@ -157,6 +162,28 @@ assumptions the spec didn't pin down explicitly — both flagged with an
 - Stableford points flatten at 5 for anything better than an albatross
   (net −3), since the spec's table doesn't define a rate beyond that.
 
+## A deliberate access-control change (Phase 7)
+
+Through Phase 5 and 6, `/rounds/[id]` was viewable only by the scorecard's
+owner or an admin. Phase 7 added `/rounds` as a **society-wide** feed of
+every round, any status — which only makes sense if clicking into one
+doesn't 404 for everyone except the person who played it. So
+`getScorecardDetail` in `app/actions/scorecards.ts` now allows **any
+logged-in society member** to view any scorecard's detail, not just its
+owner or an admin.
+
+This was a judgment call, not something the spec pins down explicitly. The
+reasoning: this app already treats handicaps as shared/visible across the
+society (that's the whole point of a shared register — comparing handicaps
+for matches), the "Society Handicap Register" framing is used throughout
+the UI, and the roadmap explicitly calls this a "society-wide feed." If you
+want pending/rejected rounds to stay private until an admin has acted on
+them (visible only to the player and admins), that's a one-line change:
+put back the `scorecard.player_id !== session.playerId && session.role
+!== "admin"` check that used to be in `getScorecardDetail`, and decide
+whether `/rounds` itself should filter to `status: 'approved'` only for
+non-owners.
+
 ## Applying a new migration without wiping your local data
 
 `npx supabase db reset` re-applies every migration from scratch — great for
@@ -216,3 +243,13 @@ exists` patterns) but isn't guaranteed for every migration going forward.
   lives on the `handicap_history` row the approval creates instead. Worth
   knowing if you ever query `scorecards` directly expecting it to reflect
   what was actually approved.
+- **`/rounds` (the society feed) is capped at the 50 most recent rounds**,
+  not paginated. Fine for a typical society's volume; revisit if that ever
+  feels short.
+- **The handicap timeline chart's starting point is back-calculated**
+  (`first history entry's handicap_value minus its adjustment_amount`)
+  rather than stored anywhere — there's no "initial handicap" row in
+  `handicap_history` for the value set at registration, so the chart
+  infers it. This means a brand-new player with zero approved rounds gets
+  no chart at all (just a "no approved rounds yet" message) rather than a
+  flat line at their starting handicap.

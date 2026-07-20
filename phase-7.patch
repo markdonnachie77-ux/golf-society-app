@@ -1,0 +1,723 @@
+diff --git a/README.md b/README.md
+index 6623c1c..4f7f06f 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # Golf Society & Handicap Tracker
+ 
+-Status: **Phase 1–6 complete** (of the 7-phase roadmap in `SPEC.md`).
++Status: **All 7 phases of the roadmap in `SPEC.md` are complete.**
+ 
+ - ✅ Phase 1 — Next.js (App Router, TS) project skeleton, Tailwind + Shadcn-style
+   UI primitives, full Supabase SQL migrations for every table, hand-written
+@@ -31,7 +31,12 @@ Status: **Phase 1–6 complete** (of the 7-phase roadmap in `SPEC.md`).
+   `players.current_handicap` update, and the `handicap_history` insert all
+   happen in one transaction, and re-check the scorecard is still pending
+   before acting (so two admins can't double-approve the same round).
+-- ⏳ Phase 7 — player profile & handicap timeline chart. Not yet built.
++- ✅ Phase 7 — player profiles (`/players`, `/players/[id]`) with a
++  handicap timeline chart (recharts) that back-calculates a sensible
++  starting point from the first approved round, and a society-wide rounds
++  feed (`/rounds`) showing every logged round with a status badge. See
++  "A deliberate access-control change" below — this phase relaxed who can
++  view a scorecard's detail page.
+ 
+ ## 1. Install dependencies
+ 
+@@ -157,6 +162,28 @@ assumptions the spec didn't pin down explicitly — both flagged with an
+ - Stableford points flatten at 5 for anything better than an albatross
+   (net −3), since the spec's table doesn't define a rate beyond that.
+ 
++## A deliberate access-control change (Phase 7)
++
++Through Phase 5 and 6, `/rounds/[id]` was viewable only by the scorecard's
++owner or an admin. Phase 7 added `/rounds` as a **society-wide** feed of
++every round, any status — which only makes sense if clicking into one
++doesn't 404 for everyone except the person who played it. So
++`getScorecardDetail` in `app/actions/scorecards.ts` now allows **any
++logged-in society member** to view any scorecard's detail, not just its
++owner or an admin.
++
++This was a judgment call, not something the spec pins down explicitly. The
++reasoning: this app already treats handicaps as shared/visible across the
++society (that's the whole point of a shared register — comparing handicaps
++for matches), the "Society Handicap Register" framing is used throughout
++the UI, and the roadmap explicitly calls this a "society-wide feed." If you
++want pending/rejected rounds to stay private until an admin has acted on
++them (visible only to the player and admins), that's a one-line change:
++put back the `scorecard.player_id !== session.playerId && session.role
++!== "admin"` check that used to be in `getScorecardDetail`, and decide
++whether `/rounds` itself should filter to `status: 'approved'` only for
++non-owners.
++
+ ## Applying a new migration without wiping your local data
+ 
+ `npx supabase db reset` re-applies every migration from scratch — great for
+@@ -216,3 +243,13 @@ exists` patterns) but isn't guaranteed for every migration going forward.
+   lives on the `handicap_history` row the approval creates instead. Worth
+   knowing if you ever query `scorecards` directly expecting it to reflect
+   what was actually approved.
++- **`/rounds` (the society feed) is capped at the 50 most recent rounds**,
++  not paginated. Fine for a typical society's volume; revisit if that ever
++  feels short.
++- **The handicap timeline chart's starting point is back-calculated**
++  (`first history entry's handicap_value minus its adjustment_amount`)
++  rather than stored anywhere — there's no "initial handicap" row in
++  `handicap_history` for the value set at registration, so the chart
++  infers it. This means a brand-new player with zero approved rounds gets
++  no chart at all (just a "no approved rounds yet" message) rather than a
++  flat line at their starting handicap.
+diff --git a/app/actions/players.ts b/app/actions/players.ts
+new file mode 100644
+index 0000000..530cdd5
+--- /dev/null
++++ b/app/actions/players.ts
+@@ -0,0 +1,86 @@
++"use server";
++
++import { requireSession } from "@/lib/auth";
++import { createServiceClient } from "@/lib/supabase/server";
++
++export interface PlayerListRow {
++  id: string;
++  first_name: string;
++  last_name: string;
++  current_handicap: number;
++  role: string;
++}
++
++export async function listAllPlayers(): Promise<PlayerListRow[]> {
++  await requireSession();
++  const supabase = createServiceClient();
++
++  const { data, error } = await supabase
++    .from("players")
++    .select("id, first_name, last_name, current_handicap, role")
++    .order("last_name", { ascending: true });
++
++  if (error || !data) return [];
++  return data;
++}
++
++export interface HandicapHistoryPoint {
++  effectiveDate: string;
++  handicapValue: number;
++  adjustmentAmount: number;
++  notes: string | null;
++}
++
++export interface RecentRoundRow {
++  id: string;
++  playedAt: string;
++  courseName: string;
++  status: string;
++  totalStablefordPoints: number | null;
++}
++
++export async function getPlayerProfile(playerId: string) {
++  await requireSession();
++  const supabase = createServiceClient();
++
++  const { data: player, error: playerError } = await supabase
++    .from("players")
++    .select("id, first_name, last_name, current_handicap, role, created_at")
++    .eq("id", playerId)
++    .single();
++
++  if (playerError || !player) return null;
++
++  const { data: historyRows } = await supabase
++    .from("handicap_history")
++    .select("handicap_value, adjustment_amount, effective_date, notes")
++    .eq("player_id", playerId)
++    .order("effective_date", { ascending: true });
++
++  const history: HandicapHistoryPoint[] = (historyRows ?? []).map((h) => ({
++    effectiveDate: h.effective_date,
++    handicapValue: h.handicap_value,
++    adjustmentAmount: h.adjustment_amount,
++    notes: h.notes,
++  }));
++
++  const { data: roundRows } = await supabase
++    .from("scorecards")
++    .select("id, played_at, status, total_stableford_points, courses(name)")
++    .eq("player_id", playerId)
++    .order("played_at", { ascending: false })
++    .limit(10);
++
++  const recentRounds: RecentRoundRow[] = (roundRows ?? []).map((r) => {
++    const course = r.courses as unknown as { name: string } | null;
++    return {
++      id: r.id,
++      playedAt: r.played_at,
++      courseName: course?.name ?? "Unknown course",
++      status: r.status,
++      totalStablefordPoints: r.total_stableford_points,
++    };
++  });
++
++  return { player, history, recentRounds };
++}
+diff --git a/app/actions/scorecards.ts b/app/actions/scorecards.ts
+index f86431f..166bde9 100644
+--- a/app/actions/scorecards.ts
++++ b/app/actions/scorecards.ts
+@@ -177,7 +177,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+ // ---------- Retrieval ----------
+ 
+ export async function getScorecardDetail(scorecardId: string) {
+-  const session = await requireSession();
++  await requireSession(); // just needs to be logged in — see note below
+   const supabase = createServiceClient();
+ 
+   const { data: scorecard, error } = await supabase
+@@ -190,10 +190,12 @@ export async function getScorecardDetail(scorecardId: string) {
+ 
+   if (error || !scorecard) return null;
+ 
+-  // A player may only view their own scorecards; admins may view any.
+-  if (scorecard.player_id !== session.playerId && session.role !== "admin") {
+-    return null;
+-  }
++  // Phase 7 note: this used to be owner-or-admin only. Once /rounds became
++  // a society-wide feed (see listSocietyRounds below), gating detail pages
++  // to the owner would mean every non-owner click 404s — so this is now
++  // open to any authenticated society member, matching how the rest of
++  // the app already treats handicaps and results as shared/visible within
++  // the society rather than private to each player.
+ 
+   const { data: course } = await supabase
+     .from("courses")
+@@ -229,3 +231,51 @@ export async function getScorecardDetail(scorecardId: string) {
+ 
+   return { scorecard, course, scores: sortedScores, appliedChange };
+ }
++
++// ---------- Society-wide feed ----------
++
++export interface SocietyRoundRow {
++  id: string;
++  played_at: string;
++  status: string;
++  total_stableford_points: number | null;
++  proposed_handicap_change: number | null;
++  player_name: string;
++  course_name: string;
++}
++
++const SOCIETY_FEED_LIMIT = 50;
++
++/** Most recent rounds across the whole society, any status — this is a
++ * shared feed, not a per-player one, so it isn't filtered to "my rounds"
++ * or "approved only". Capped rather than paginated for now; revisit if a
++ * society's round volume ever makes 50 feel too short. */
++export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
++  await requireSession();
++  const supabase = createServiceClient();
++
++  const { data, error } = await supabase
++    .from("scorecards")
++    .select(
++      "id, played_at, status, total_stableford_points, proposed_handicap_change, players(first_name, last_name), courses(name)"
++    )
++    .order("played_at", { ascending: false })
++    .order("created_at", { ascending: false })
++    .limit(SOCIETY_FEED_LIMIT);
++
++  if (error || !data) return [];
++
++  return data.map((row) => {
++    const player = row.players as unknown as { first_name: string; last_name: string } | null;
++    const course = row.courses as unknown as { name: string } | null;
++    return {
++      id: row.id,
++      played_at: row.played_at,
++      status: row.status,
++      total_stableford_points: row.total_stableford_points,
++      proposed_handicap_change: row.proposed_handicap_change,
++      player_name: player ? `${player.first_name} ${player.last_name}` : "Unknown player",
++      course_name: course?.name ?? "Unknown course",
++    };
++  });
++}
+diff --git a/app/dashboard/page.tsx b/app/dashboard/page.tsx
+index 60bd787..0945439 100644
+--- a/app/dashboard/page.tsx
++++ b/app/dashboard/page.tsx
+@@ -18,7 +18,7 @@ export default async function DashboardPage() {
+   return (
+     <main className="min-h-screen bg-background px-4 py-12">
+       <div className="mx-auto max-w-2xl">
+-        <div className="mb-8 flex items-center justify-between">
++        <div className="mb-6 flex items-center justify-between">
+           <div>
+             <p className="font-numeral text-xs uppercase tracking-widest text-accent">
+               Society Handicap Register
+@@ -27,28 +27,38 @@ export default async function DashboardPage() {
+               {player ? `${player.first_name} ${player.last_name}` : "Dashboard"}
+             </h1>
+           </div>
+-          <div className="flex items-center gap-2">
+-            <Button asChild variant="accent" size="sm">
+-              <Link href="/rounds/new">Log a round</Link>
++          <form action={logout}>
++            <Button type="submit" variant="outline" size="sm">
++              Log out
+             </Button>
+-            {player?.role === "admin" && (
+-              <>
+-                <Button asChild variant="outline" size="sm">
+-                  <Link href="/admin/approvals">Approvals</Link>
+-                </Button>
+-                <Button asChild variant="outline" size="sm">
+-                  <Link href="/courses">Courses</Link>
+-                </Button>
+-              </>
+-            )}
+-            <form action={logout}>
+-              <Button type="submit" variant="outline" size="sm">
+-                Log out
+-              </Button>
+-            </form>
+-          </div>
++          </form>
+         </div>
+ 
++        <nav className="mb-8 flex flex-wrap gap-2">
++          <Button asChild variant="accent" size="sm">
++            <Link href="/rounds/new">Log a round</Link>
++          </Button>
++          <Button asChild variant="outline" size="sm">
++            <Link href={`/players/${session.playerId}`}>My profile</Link>
++          </Button>
++          <Button asChild variant="outline" size="sm">
++            <Link href="/rounds">Rounds</Link>
++          </Button>
++          <Button asChild variant="outline" size="sm">
++            <Link href="/players">Members</Link>
++          </Button>
++          {player?.role === "admin" && (
++            <>
++              <Button asChild variant="outline" size="sm">
++                <Link href="/admin/approvals">Approvals</Link>
++              </Button>
++              <Button asChild variant="outline" size="sm">
++                <Link href="/courses">Courses</Link>
++              </Button>
++            </>
++          )}
++        </nav>
++
+         <Card>
+           <CardHeader>
+             <CardTitle className="text-lg">Current handicap</CardTitle>
+@@ -60,11 +70,6 @@ export default async function DashboardPage() {
+             </span>
+           </CardContent>
+         </Card>
+-
+-        <p className="mt-6 text-sm text-muted-foreground">
+-          Scorecard entry, the handicap timeline, and (for admins) the approval queue
+-          land in later phases of this build.
+-        </p>
+       </div>
+     </main>
+   );
+diff --git a/app/players/[id]/page.tsx b/app/players/[id]/page.tsx
+new file mode 100644
+index 0000000..6f49dea
+--- /dev/null
++++ b/app/players/[id]/page.tsx
+@@ -0,0 +1,100 @@
++import { notFound } from "next/navigation";
++import Link from "next/link";
++import { getPlayerProfile } from "@/app/actions/players";
++import { HandicapTimelineChart } from "@/components/handicap-timeline-chart";
++import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
++import { cn } from "@/lib/utils";
++import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
++
++export default async function PlayerProfilePage({
++  params,
++}: {
++  params: Promise<{ id: string }>;
++}) {
++  const { id } = await params;
++  const result = await getPlayerProfile(id);
++
++  if (!result) {
++    notFound();
++  }
++
++  const { player, history, recentRounds } = result;
++
++  return (
++    <main className="min-h-screen bg-background px-4 py-12">
++      <div className="mx-auto max-w-2xl">
++        <div className="mb-8">
++          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
++            Society Handicap Register
++          </p>
++          <h1 className="font-display mt-1 text-3xl font-semibold">
++            {player.first_name} {player.last_name}
++          </h1>
++          <p className="mt-1 text-sm text-muted-foreground">
++            Member since {new Date(player.created_at).toLocaleDateString()}
++          </p>
++        </div>
++
++        <Card>
++          <CardHeader>
++            <CardTitle className="text-lg">Handicap</CardTitle>
++            <CardDescription>
++              Tracks approved rounds and any manual admin adjustments.
++            </CardDescription>
++          </CardHeader>
++          <CardContent>
++            <div className="mb-4 font-numeral text-4xl font-semibold text-primary">
++              {player.current_handicap}
++            </div>
++            <HandicapTimelineChart
++              history={history}
++              registeredAt={player.created_at}
++              currentHandicap={player.current_handicap}
++            />
++          </CardContent>
++        </Card>
++
++        <div className="mt-6">
++          <h2 className="font-display mb-3 text-lg font-semibold">Recent rounds</h2>
++          {recentRounds.length === 0 ? (
++            <p className="text-sm text-muted-foreground">No rounds logged yet.</p>
++          ) : (
++            <div className="rounded-lg border border-border bg-card">
++              {recentRounds.map((round, i) => (
++                <div key={round.id}>
++                  {i > 0 && <div className="ledger-rule" />}
++                  <Link
++                    href={`/rounds/${round.id}`}
++                    className="flex items-center justify-between px-5 py-4 hover:bg-secondary"
++                  >
++                    <div>
++                      <p className="font-medium">{round.courseName}</p>
++                      <p className="text-sm text-muted-foreground">
++                        {new Date(round.playedAt).toLocaleDateString()}
++                      </p>
++                    </div>
++                    <div className="flex items-center gap-3">
++                      {round.totalStablefordPoints !== null && (
++                        <span className="font-numeral text-sm text-muted-foreground">
++                          {round.totalStablefordPoints} pts
++                        </span>
++                      )}
++                      <span
++                        className={cn(
++                          "rounded-full px-3 py-1 text-xs font-medium",
++                          SCORECARD_STATUS_STYLE[round.status]
++                        )}
++                      >
++                        {SCORECARD_STATUS_LABEL[round.status]}
++                      </span>
++                    </div>
++                  </Link>
++                </div>
++              ))}
++            </div>
++          )}
++        </div>
++      </div>
++    </main>
++  );
++}
+diff --git a/app/players/page.tsx b/app/players/page.tsx
+new file mode 100644
+index 0000000..880ba0e
+--- /dev/null
++++ b/app/players/page.tsx
+@@ -0,0 +1,41 @@
++import Link from "next/link";
++import { listAllPlayers } from "@/app/actions/players";
++
++export default async function PlayersPage() {
++  const players = await listAllPlayers();
++
++  return (
++    <main className="min-h-screen bg-background px-4 py-12">
++      <div className="mx-auto max-w-2xl">
++        <div className="mb-8">
++          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
++            Society Handicap Register
++          </p>
++          <h1 className="font-display mt-1 text-3xl font-semibold">Members</h1>
++        </div>
++
++        <div className="rounded-lg border border-border bg-card">
++          {players.map((player, i) => (
++            <div key={player.id}>
++              {i > 0 && <div className="ledger-rule" />}
++              <Link
++                href={`/players/${player.id}`}
++                className="flex items-center justify-between px-5 py-4 hover:bg-secondary"
++              >
++                <span className="font-medium">
++                  {player.first_name} {player.last_name}
++                  {player.role === "admin" && (
++                    <span className="ml-2 text-xs font-normal text-muted-foreground">admin</span>
++                  )}
++                </span>
++                <span className="font-numeral text-sm text-muted-foreground">
++                  {player.current_handicap}
++                </span>
++              </Link>
++            </div>
++          ))}
++        </div>
++      </div>
++    </main>
++  );
++}
+diff --git a/app/rounds/[id]/page.tsx b/app/rounds/[id]/page.tsx
+index c1a51eb..b1eb1be 100644
+--- a/app/rounds/[id]/page.tsx
++++ b/app/rounds/[id]/page.tsx
+@@ -6,18 +6,7 @@ import { AdminApprovalPanel } from "@/components/admin-approval-panel";
+ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+ import { Button } from "@/components/ui/button";
+ import { cn } from "@/lib/utils";
+-
+-const STATUS_LABEL: Record<string, string> = {
+-  pending_approval: "Pending approval",
+-  approved: "Approved",
+-  rejected: "Rejected",
+-};
+-
+-const STATUS_STYLE: Record<string, string> = {
+-  pending_approval: "bg-accent/15 text-accent",
+-  approved: "bg-primary/15 text-primary",
+-  rejected: "bg-destructive/15 text-destructive",
+-};
++import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
+ 
+ interface ScoreRow {
+   id: string;
+@@ -59,10 +48,10 @@ export default async function ScorecardDetailPage({
+           <span
+             className={cn(
+               "rounded-full px-3 py-1 text-xs font-medium",
+-              STATUS_STYLE[scorecard.status]
++              SCORECARD_STATUS_STYLE[scorecard.status]
+             )}
+           >
+-            {STATUS_LABEL[scorecard.status]}
++            {SCORECARD_STATUS_LABEL[scorecard.status]}
+           </span>
+         </div>
+ 
+@@ -135,10 +124,13 @@ export default async function ScorecardDetailPage({
+           ))}
+         </div>
+ 
+-        <div className="mt-6">
++        <div className="mt-6 flex gap-3">
+           <Button asChild variant="outline">
+             <Link href="/dashboard">Back to dashboard</Link>
+           </Button>
++          <Button asChild variant="outline">
++            <Link href="/rounds">All rounds</Link>
++          </Button>
+         </div>
+       </div>
+     </main>
+diff --git a/app/rounds/page.tsx b/app/rounds/page.tsx
+new file mode 100644
+index 0000000..4cd005d
+--- /dev/null
++++ b/app/rounds/page.tsx
+@@ -0,0 +1,62 @@
++import Link from "next/link";
++import { listSocietyRounds } from "@/app/actions/scorecards";
++import { cn } from "@/lib/utils";
++import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
++
++export default async function RoundsFeedPage() {
++  const rounds = await listSocietyRounds();
++
++  return (
++    <main className="min-h-screen bg-background px-4 py-12">
++      <div className="mx-auto max-w-2xl">
++        <div className="mb-8">
++          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
++            Society Handicap Register
++          </p>
++          <h1 className="font-display mt-1 text-3xl font-semibold">Rounds</h1>
++          <p className="mt-1 text-sm text-muted-foreground">
++            Every round logged across the society, most recent first.
++          </p>
++        </div>
++
++        {rounds.length === 0 ? (
++          <p className="text-sm text-muted-foreground">No rounds logged yet.</p>
++        ) : (
++          <div className="rounded-lg border border-border bg-card">
++            {rounds.map((round, i) => (
++              <div key={round.id}>
++                {i > 0 && <div className="ledger-rule" />}
++                <Link
++                  href={`/rounds/${round.id}`}
++                  className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-secondary"
++                >
++                  <div>
++                    <p className="font-medium">{round.player_name}</p>
++                    <p className="text-sm text-muted-foreground">
++                      {round.course_name} · {new Date(round.played_at).toLocaleDateString()}
++                    </p>
++                  </div>
++                  <div className="flex items-center gap-3">
++                    {round.total_stableford_points !== null && (
++                      <span className="font-numeral text-sm text-muted-foreground">
++                        {round.total_stableford_points} pts
++                      </span>
++                    )}
++                    <span
++                      className={cn(
++                        "rounded-full px-3 py-1 text-xs font-medium",
++                        SCORECARD_STATUS_STYLE[round.status]
++                      )}
++                    >
++                      {SCORECARD_STATUS_LABEL[round.status]}
++                    </span>
++                  </div>
++                </Link>
++              </div>
++            ))}
++          </div>
++        )}
++      </div>
++    </main>
++  );
++}
+diff --git a/components/handicap-timeline-chart.tsx b/components/handicap-timeline-chart.tsx
+new file mode 100644
+index 0000000..a058f9d
+--- /dev/null
++++ b/components/handicap-timeline-chart.tsx
+@@ -0,0 +1,101 @@
++"use client";
++
++import {
++  LineChart,
++  Line,
++  XAxis,
++  YAxis,
++  Tooltip,
++  ResponsiveContainer,
++  CartesianGrid,
++} from "recharts";
++import type { HandicapHistoryPoint } from "@/app/actions/players";
++
++// Matches the CSS custom properties in app/globals.css (--primary / --accent)
++// as concrete hex values — recharts' SVG props don't resolve hsl(var(...)).
++const FAIRWAY_GREEN = "#2c5f47";
++const BRASS = "#b8874a";
++
++interface ChartPoint {
++  date: string;
++  handicap: number;
++  notes?: string | null;
++}
++
++export function HandicapTimelineChart({
++  history,
++  registeredAt,
++  currentHandicap,
++}: {
++  history: HandicapHistoryPoint[];
++  registeredAt: string;
++  currentHandicap: number;
++}) {
++  if (history.length === 0) {
++    return (
++      <p className="text-sm text-muted-foreground">
++        No approved rounds yet — the timeline starts once a round is approved.
++      </p>
++    );
++  }
++
++  // Back-calculate the handicap before the first approved round, so the
++  // chart has a sensible starting point rather than opening on a single dot.
++  const first = history[0];
++  const startingHandicap = first.handicapValue - first.adjustmentAmount;
++
++  const points: ChartPoint[] = [
++    { date: registeredAt, handicap: startingHandicap, notes: "Registered" },
++    ...history.map((h) => ({
++      date: h.effectiveDate,
++      handicap: h.handicapValue,
++      notes: h.notes,
++    })),
++  ];
++
++  function formatDate(iso: string) {
++    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
++  }
++
++  return (
++    <div>
++      <ResponsiveContainer width="100%" height={220}>
++        <LineChart data={points} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
++          <CartesianGrid strokeDasharray="3 3" stroke="hsl(40 22% 82%)" vertical={false} />
++          <XAxis
++            dataKey="date"
++            tickFormatter={formatDate}
++            tick={{ fontSize: 11, fontFamily: "var(--font-mono)" }}
++            stroke="hsl(158 15% 38%)"
++          />
++          <YAxis
++            tick={{ fontSize: 11, fontFamily: "var(--font-mono)" }}
++            stroke="hsl(158 15% 38%)"
++            width={32}
++          />
++          <Tooltip
++            formatter={(value: number) => [value, "Handicap"]}
++            labelFormatter={(label: string) => formatDate(label)}
++            contentStyle={{
++              fontFamily: "var(--font-body)",
++              fontSize: "0.8rem",
++              borderRadius: "0.4rem",
++              border: "1px solid hsl(40 22% 82%)",
++            }}
++          />
++          <Line
++            type="monotone"
++            dataKey="handicap"
++            stroke={FAIRWAY_GREEN}
++            strokeWidth={2}
++            dot={{ r: 3, fill: BRASS, strokeWidth: 0 }}
++            activeDot={{ r: 5 }}
++          />
++        </LineChart>
++      </ResponsiveContainer>
++      <p className="mt-1 text-right font-numeral text-xs text-muted-foreground">
++        Current: {currentHandicap}
++      </p>
++    </div>
++  );
++}
+diff --git a/lib/scorecard-status.ts b/lib/scorecard-status.ts
+new file mode 100644
+index 0000000..629a68e
+--- /dev/null
++++ b/lib/scorecard-status.ts
+@@ -0,0 +1,11 @@
++export const SCORECARD_STATUS_LABEL: Record<string, string> = {
++  pending_approval: "Pending approval",
++  approved: "Approved",
++  rejected: "Rejected",
++};
++
++export const SCORECARD_STATUS_STYLE: Record<string, string> = {
++  pending_approval: "bg-accent/15 text-accent",
++  approved: "bg-primary/15 text-primary",
++  rejected: "bg-destructive/15 text-destructive",
++};

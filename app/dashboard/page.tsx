@@ -18,7 +18,7 @@ export default async function DashboardPage() {
   return (
     <main className="min-h-screen bg-background px-4 py-12">
       <div className="mx-auto max-w-2xl">
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-6 flex items-center justify-between">
           <div>
             <p className="font-numeral text-xs uppercase tracking-widest text-accent">
               Society Handicap Register
@@ -27,27 +27,37 @@ export default async function DashboardPage() {
               {player ? `${player.first_name} ${player.last_name}` : "Dashboard"}
             </h1>
           </div>
-          <div className="flex items-center gap-2">
-            <Button asChild variant="accent" size="sm">
-              <Link href="/rounds/new">Log a round</Link>
+          <form action={logout}>
+            <Button type="submit" variant="outline" size="sm">
+              Log out
             </Button>
-            {player?.role === "admin" && (
-              <>
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/admin/approvals">Approvals</Link>
-                </Button>
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/courses">Courses</Link>
-                </Button>
-              </>
-            )}
-            <form action={logout}>
-              <Button type="submit" variant="outline" size="sm">
-                Log out
-              </Button>
-            </form>
-          </div>
+          </form>
         </div>
+
+        <nav className="mb-8 flex flex-wrap gap-2">
+          <Button asChild variant="accent" size="sm">
+            <Link href="/rounds/new">Log a round</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/players/${session.playerId}`}>My profile</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/rounds">Rounds</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/players">Members</Link>
+          </Button>
+          {player?.role === "admin" && (
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/admin/approvals">Approvals</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/courses">Courses</Link>
+              </Button>
+            </>
+          )}
+        </nav>
 
         <Card>
           <CardHeader>
@@ -60,11 +70,6 @@ export default async function DashboardPage() {
             </span>
           </CardContent>
         </Card>
-
-        <p className="mt-6 text-sm text-muted-foreground">
-          Scorecard entry, the handicap timeline, and (for admins) the approval queue
-          land in later phases of this build.
-        </p>
       </div>
     </main>
   );

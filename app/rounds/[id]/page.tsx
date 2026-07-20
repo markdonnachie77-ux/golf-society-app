@@ -6,18 +6,7 @@ import { AdminApprovalPanel } from "@/components/admin-approval-panel";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-const STATUS_LABEL: Record<string, string> = {
-  pending_approval: "Pending approval",
-  approved: "Approved",
-  rejected: "Rejected",
-};
-
-const STATUS_STYLE: Record<string, string> = {
-  pending_approval: "bg-accent/15 text-accent",
-  approved: "bg-primary/15 text-primary",
-  rejected: "bg-destructive/15 text-destructive",
-};
+import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
 
 interface ScoreRow {
   id: string;
@@ -59,10 +48,10 @@ export default async function ScorecardDetailPage({
           <span
             className={cn(
               "rounded-full px-3 py-1 text-xs font-medium",
-              STATUS_STYLE[scorecard.status]
+              SCORECARD_STATUS_STYLE[scorecard.status]
             )}
           >
-            {STATUS_LABEL[scorecard.status]}
+            {SCORECARD_STATUS_LABEL[scorecard.status]}
           </span>
         </div>
 
@@ -135,9 +124,12 @@ export default async function ScorecardDetailPage({
           ))}
         </div>
 
-        <div className="mt-6">
+        <div className="mt-6 flex gap-3">
           <Button asChild variant="outline">
             <Link href="/dashboard">Back to dashboard</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/rounds">All rounds</Link>
           </Button>
         </div>
       </div>

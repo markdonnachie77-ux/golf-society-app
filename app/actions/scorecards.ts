@@ -177,7 +177,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
 // ---------- Retrieval ----------
 
 export async function getScorecardDetail(scorecardId: string) {
-  const session = await requireSession();
+  await requireSession(); // just needs to be logged in — see note below
   const supabase = createServiceClient();
 
   const { data: scorecard, error } = await supabase
@@ -190,10 +190,12 @@ export async function getScorecardDetail(scorecardId: string) {
 
   if (error || !scorecard) return null;
 
-  // A player may only view their own scorecards; admins may view any.
-  if (scorecard.player_id !== session.playerId && session.role !== "admin") {
-    return null;
-  }
+  // Phase 7 note: this used to be owner-or-admin only. Once /rounds became
+  // a society-wide feed (see listSocietyRounds below), gating detail pages
+  // to the owner would mean every non-owner click 404s — so this is now
+  // open to any authenticated society member, matching how the rest of
+  // the app already treats handicaps and results as shared/visible within
+  // the society rather than private to each player.
 
   const { data: course } = await supabase
     .from("courses")
@@ -228,4 +230,52 @@ export async function getScorecardDetail(scorecardId: string) {
   }
 
   return { scorecard, course, scores: sortedScores, appliedChange };
+}
+
+// ---------- Society-wide feed ----------
+
+export interface SocietyRoundRow {
+  id: string;
+  played_at: string;
+  status: string;
+  total_stableford_points: number | null;
+  proposed_handicap_change: number | null;
+  player_name: string;
+  course_name: string;
+}
+
+const SOCIETY_FEED_LIMIT = 50;
+
+/** Most recent rounds across the whole society, any status — this is a
+ * shared feed, not a per-player one, so it isn't filtered to "my rounds"
+ * or "approved only". Capped rather than paginated for now; revisit if a
+ * society's round volume ever makes 50 feel too short. */
+export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
+  await requireSession();
+  const supabase = createServiceClient();
+
+  const { data, error } = await supabase
+    .from("scorecards")
+    .select(
+      "id, played_at, status, total_stableford_points, proposed_handicap_change, players(first_name, last_name), courses(name)"
+    )
+    .order("played_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(SOCIETY_FEED_LIMIT);
+
+  if (error || !data) return [];
+
+  return data.map((row) => {
+    const player = row.players as unknown as { first_name: string; last_name: string } | null;
+    const course = row.courses as unknown as { name: string } | null;
+    return {
+      id: row.id,
+      played_at: row.played_at,
+      status: row.status,
+      total_stableford_points: row.total_stableford_points,
+      proposed_handicap_change: row.proposed_handicap_change,
+      player_name: player ? `${player.first_name} ${player.last_name}` : "Unknown player",
+      course_name: course?.name ?? "Unknown course",
+    };
+  });
 }
