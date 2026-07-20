@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listSocietyRounds } from "@/app/actions/scorecards";
 import { cn } from "@/lib/utils";
 import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
+import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function RoundsFeedPage() {
   const rounds = await listSocietyRounds();
@@ -10,9 +11,7 @@ export default async function RoundsFeedPage() {
     <main className="min-h-screen bg-background px-4 py-12">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8">
-          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
-            Society Handicap Register
-          </p>
+          <BrandEyebrow />
           <h1 className="font-display mt-1 text-3xl font-semibold">Rounds</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Every round logged across the society, most recent first.

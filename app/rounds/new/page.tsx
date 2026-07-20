@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { listCoursesForRound } from "@/app/actions/scorecards";
 import { NewScorecardForm } from "@/components/new-scorecard-form";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function NewRoundPage() {
   const session = await requireSession();
@@ -17,9 +18,7 @@ export default async function NewRoundPage() {
     <main className="min-h-screen bg-background px-4 py-12">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8">
-          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
-            Society Handicap Register
-          </p>
+          <BrandEyebrow />
           <h1 className="font-display mt-1 text-3xl font-semibold">Log a round</h1>
         </div>
 

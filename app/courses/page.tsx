@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listCourses } from "@/app/actions/courses";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function CoursesPage() {
   const courses = await listCourses();
@@ -11,9 +12,7 @@ export default async function CoursesPage() {
       <div className="mx-auto max-w-3xl">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <p className="font-numeral text-xs uppercase tracking-widest text-accent">
-              Society Handicap Register
-            </p>
+            <BrandEyebrow />
             <h1 className="font-display mt-1 text-3xl font-semibold">Courses</h1>
           </div>
           <Button asChild variant="accent">

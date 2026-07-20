@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
+import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 interface ScoreRow {
   id: string;
@@ -38,9 +39,7 @@ export default async function ScorecardDetailPage({
       <div className="mx-auto max-w-2xl">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <p className="font-numeral text-xs uppercase tracking-widest text-accent">
-              Society Handicap Register
-            </p>
+            <BrandEyebrow />
             <h1 className="font-display mt-1 text-3xl font-semibold">
               {course?.name ?? "Round"}
             </h1>

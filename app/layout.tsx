@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Work_Sans, JetBrains_Mono } from "next/font/google";
+import { SOCIETY_NAME } from "@/lib/branding";
 import "./globals.css";
 
 const display = Fraunces({
@@ -21,8 +22,13 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Golf Society",
-  description: "Society handicap tracking & scorecards",
+  title: SOCIETY_NAME,
+  description: `${SOCIETY_NAME} handicap tracking & scorecards`,
+  openGraph: {
+    title: SOCIETY_NAME,
+    description: `${SOCIETY_NAME} handicap tracking & scorecards`,
+    images: ["/branding/society-photo.png"],
+  },
 };
 
 export default function RootLayout({

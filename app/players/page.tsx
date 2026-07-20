@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listAllPlayers } from "@/app/actions/players";
+import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function PlayersPage() {
   const players = await listAllPlayers();
@@ -8,9 +9,7 @@ export default async function PlayersPage() {
     <main className="min-h-screen bg-background px-4 py-12">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8">
-          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
-            Society Handicap Register
-          </p>
+          <BrandEyebrow />
           <h1 className="font-display mt-1 text-3xl font-semibold">Members</h1>
         </div>
 

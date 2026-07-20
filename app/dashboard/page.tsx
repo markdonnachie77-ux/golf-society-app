@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { logout } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function DashboardPage() {
   const session = await requireSession();
@@ -20,9 +21,7 @@ export default async function DashboardPage() {
       <div className="mx-auto max-w-2xl">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <p className="font-numeral text-xs uppercase tracking-widest text-accent">
-              Society Handicap Register
-            </p>
+            <BrandEyebrow />
             <h1 className="font-display mt-1 text-3xl font-semibold">
               {player ? `${player.first_name} ${player.last_name}` : "Dashboard"}
             </h1>

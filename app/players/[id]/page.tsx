@@ -5,6 +5,7 @@ import { HandicapTimelineChart } from "@/components/handicap-timeline-chart";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
+import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function PlayerProfilePage({
   params,
@@ -24,9 +25,7 @@ export default async function PlayerProfilePage({
     <main className="min-h-screen bg-background px-4 py-12">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8">
-          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
-            Society Handicap Register
-          </p>
+          <BrandEyebrow />
           <h1 className="font-display mt-1 text-3xl font-semibold">
             {player.first_name} {player.last_name}
           </h1>

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getCourseWithHoles } from "@/app/actions/courses";
 import { EditCourseForm } from "@/components/edit-course-form";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function EditCoursePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -17,9 +18,7 @@ export default async function EditCoursePage({ params }: { params: Promise<{ id:
     <main className="min-h-screen bg-background px-4 py-12">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8">
-          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
-            Society Handicap Register
-          </p>
+          <BrandEyebrow />
           <h1 className="font-display mt-1 text-3xl font-semibold">Edit course</h1>
         </div>
 
