@@ -1,0 +1,160 @@
+diff --git a/lib/database.types.ts b/lib/database.types.ts
+index dcd7ec9..264a6dc 100644
+--- a/lib/database.types.ts
++++ b/lib/database.types.ts
+@@ -1,6 +1,18 @@
+ // Hand-written to match supabase/migrations/*.sql.
+ // If you have the Supabase CLI + a linked project, prefer regenerating this
+ // with: `supabase gen types typescript --linked > lib/database.types.ts`
++//
++// IMPORTANT: every table below includes a `Relationships` array (even when
++// empty) because @supabase/supabase-js's internal generic constraints
++// require that key to be present to correctly resolve Row/Insert/Update
++// types on .from().insert()/.update()/.select(). A hand-written type
++// missing this key doesn't just lose embedded-select typing (players(...),
++// courses(...), etc.) — in some library versions it degrades basic
++// operations like .insert() to `never`, which is what caused a build
++// failure on a plain players insert that had nothing to do with embeds.
++// If you regenerate this file from `supabase gen types`, it already
++// includes accurate Relationships for you — this hand-written version
++// just needed to catch up to that format.
+ 
+ export type PlayerRole = "player" | "admin";
+ export type TeeColor = "white" | "yellow";
+@@ -32,6 +44,7 @@ export interface Database {
+           created_at?: string;
+         };
+         Update: Partial<Database["public"]["Tables"]["players"]["Insert"]>;
++        Relationships: [];
+       };
+       courses: {
+         Row: {
+@@ -53,6 +66,7 @@ export interface Database {
+           created_at?: string;
+         };
+         Update: Partial<Database["public"]["Tables"]["courses"]["Insert"]>;
++        Relationships: [];
+       };
+       holes: {
+         Row: {
+@@ -74,6 +88,15 @@ export interface Database {
+           yellow_yards?: number | null;
+         };
+         Update: Partial<Database["public"]["Tables"]["holes"]["Insert"]>;
++        Relationships: [
++          {
++            foreignKeyName: "holes_course_id_fkey";
++            columns: ["course_id"];
++            isOneToOne: false;
++            referencedRelation: "courses";
++            referencedColumns: ["id"];
++          }
++        ];
+       };
+       scorecards: {
+         Row: {
+@@ -111,6 +134,29 @@ export interface Database {
+           created_at?: string;
+         };
+         Update: Partial<Database["public"]["Tables"]["scorecards"]["Insert"]>;
++        Relationships: [
++          {
++            foreignKeyName: "scorecards_player_id_fkey";
++            columns: ["player_id"];
++            isOneToOne: false;
++            referencedRelation: "players";
++            referencedColumns: ["id"];
++          },
++          {
++            foreignKeyName: "scorecards_course_id_fkey";
++            columns: ["course_id"];
++            isOneToOne: false;
++            referencedRelation: "courses";
++            referencedColumns: ["id"];
++          },
++          {
++            foreignKeyName: "scorecards_reviewed_by_fkey";
++            columns: ["reviewed_by"];
++            isOneToOne: false;
++            referencedRelation: "players";
++            referencedColumns: ["id"];
++          }
++        ];
+       };
+       scores: {
+         Row: {
+@@ -130,6 +176,22 @@ export interface Database {
+           stableford_points: number;
+         };
+         Update: Partial<Database["public"]["Tables"]["scores"]["Insert"]>;
++        Relationships: [
++          {
++            foreignKeyName: "scores_scorecard_id_fkey";
++            columns: ["scorecard_id"];
++            isOneToOne: false;
++            referencedRelation: "scorecards";
++            referencedColumns: ["id"];
++          },
++          {
++            foreignKeyName: "scores_hole_id_fkey";
++            columns: ["hole_id"];
++            isOneToOne: false;
++            referencedRelation: "holes";
++            referencedColumns: ["id"];
++          }
++        ];
+       };
+       handicap_history: {
+         Row: {
+@@ -151,24 +213,34 @@ export interface Database {
+           notes?: string | null;
+         };
+         Update: Partial<Database["public"]["Tables"]["handicap_history"]["Insert"]>;
++        Relationships: [
++          {
++            foreignKeyName: "handicap_history_player_id_fkey";
++            columns: ["player_id"];
++            isOneToOne: false;
++            referencedRelation: "players";
++            referencedColumns: ["id"];
++          },
++          {
++            foreignKeyName: "handicap_history_scorecard_id_fkey";
++            columns: ["scorecard_id"];
++            isOneToOne: false;
++            referencedRelation: "scorecards";
++            referencedColumns: ["id"];
++          }
++        ];
+       };
+     };
+-    Functions: {
+-      approve_scorecard: {
+-        Args: {
+-          p_scorecard_id: string;
+-          p_reviewer_id: string;
+-          p_applied_change: number;
+-        };
+-        Returns: { new_handicap: number }[];
+-      };
+-      reject_scorecard: {
+-        Args: {
+-          p_scorecard_id: string;
+-          p_reviewer_id: string;
+-        };
+-        Returns: undefined;
+-      };
+-    };
++    Views: {};
++    // Functions are intentionally omitted — approve_scorecard/reject_scorecard
++    // RPC calls in app/actions/approvals.ts bypass Database-generic typing
++    // entirely with an `any` cast, since matching this installed
++    // supabase-js version's .rpc() generic constraints by hand kept
++    // surfacing new mismatches. If you regenerate this file from
++    // `supabase gen types`, it'll add a correct Functions section
++    // automatically and those `any` casts can be removed at that point.
++    Functions: {};
++    Enums: {};
++    CompositeTypes: {};
+   };
+ }
