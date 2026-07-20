@@ -1,0 +1,42 @@
+diff --git a/components/auth-hero-photo.tsx b/components/auth-hero-photo.tsx
+index ee1fa56..b268709 100644
+--- a/components/auth-hero-photo.tsx
++++ b/components/auth-hero-photo.tsx
+@@ -3,20 +3,23 @@ import { SOCIETY_NAME } from "@/lib/branding";
+ 
+ export function AuthHeroPhoto() {
+   return (
+-    <div className="relative hidden flex-1 md:block">
+-      <Image
+-        src="/branding/society-photo.png"
+-        alt={`${SOCIETY_NAME} members`}
+-        fill
+-        priority
+-        sizes="50vw"
+-        className="object-cover"
+-      />
+-      {/* Fairway-green gradient rather than plain black — ties the photo
+-          into the same palette as the rest of the app instead of a
+-          generic dark-overlay-for-legibility treatment. */}
+-      <div className="absolute inset-0 bg-gradient-to-t from-primary/95 via-primary/10 to-transparent" />
+-      <div className="absolute bottom-10 left-10 right-10">
++    <div className="hidden flex-1 flex-col items-center justify-center gap-6 bg-primary p-10 md:flex">
++      {/* aspect-[865/545] matches the source photo's own proportions
++          exactly, so object-contain never has to crop anything — the
++          whole group stays in frame regardless of viewport height. The
++          brass border gives it a "framed photo on the clubhouse wall"
++          treatment rather than a bleeding background image. */}
++      <div className="relative aspect-[865/545] w-full max-w-lg overflow-hidden rounded-lg border-4 border-accent/70 shadow-lg">
++        <Image
++          src="/branding/society-photo.png"
++          alt={`${SOCIETY_NAME} members`}
++          fill
++          priority
++          sizes="(min-width: 768px) 512px, 100vw"
++          className="object-contain"
++        />
++      </div>
++      <div className="text-center">
+         <p className="font-display text-3xl font-semibold text-primary-foreground">
+           {SOCIETY_NAME}
+         </p>
