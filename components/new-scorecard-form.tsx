@@ -231,7 +231,7 @@ export function NewScorecardForm({
       {roundType && !loadingHoles && holes.length > 0 && (
         <div>
           <Label>Scores</Label>
-          <div className="mt-3 rounded-lg border border-border bg-card">
+          <div className="mt-3 overflow-x-auto rounded-lg border border-border bg-card">
             <div className="grid grid-cols-[3rem_3rem_4rem_1fr] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
               <span>Hole</span>
               <span>Par</span>
@@ -259,7 +259,7 @@ export function NewScorecardForm({
                       setGrossByHole((prev) => ({ ...prev, [hole.id]: e.target.value }))
                     }
                     disabled={pending}
-                    className="font-numeral h-9 w-24"
+                    className="font-numeral w-full min-w-0"
                   />
                 </div>
               </React.Fragment>

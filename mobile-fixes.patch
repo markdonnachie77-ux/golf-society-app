@@ -1,0 +1,118 @@
+diff --git a/app/rounds/[id]/page.tsx b/app/rounds/[id]/page.tsx
+index ec698c7..dfb60f9 100644
+--- a/app/rounds/[id]/page.tsx
++++ b/app/rounds/[id]/page.tsx
+@@ -99,7 +99,7 @@ export default async function ScorecardDetailPage({
+           </div>
+         )}
+ 
+-        <div className="mt-6 rounded-lg border border-border bg-card">
++        <div className="mt-6 overflow-x-auto rounded-lg border border-border bg-card">
+           <div className="grid grid-cols-[3rem_3rem_3rem_3rem_3rem_1fr] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
+             <span>Hole</span>
+             <span>Par</span>
+diff --git a/components/course-form.tsx b/components/course-form.tsx
+index 6ab378d..76b6e51 100644
+--- a/components/course-form.tsx
++++ b/components/course-form.tsx
+@@ -144,7 +144,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps)
+           </span>
+         </div>
+ 
+-        <div className="rounded-lg border border-border bg-card">
++        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+           <div className="grid grid-cols-[3rem_1fr_5rem_5rem_5rem] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
+             <span>Hole</span>
+             <span>Par</span>
+@@ -172,7 +172,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps)
+                   onChange={(e) =>
+                     updateHole(index, { strokeIndex: Number(e.target.value) || 0 })
+                   }
+-                  className="font-numeral h-9"
++                  className="font-numeral"
+                   disabled={pending}
+                 />
+                 <Input
+@@ -184,7 +184,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps)
+                       whiteYards: e.target.value ? Number(e.target.value) : null,
+                     })
+                   }
+-                  className="font-numeral h-9"
++                  className="font-numeral"
+                   disabled={pending}
+                 />
+                 <Input
+@@ -196,7 +196,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps)
+                       yellowYards: e.target.value ? Number(e.target.value) : null,
+                     })
+                   }
+-                  className="font-numeral h-9"
++                  className="font-numeral"
+                   disabled={pending}
+                 />
+               </div>
+diff --git a/components/new-scorecard-form.tsx b/components/new-scorecard-form.tsx
+index 455fc05..a0470c3 100644
+--- a/components/new-scorecard-form.tsx
++++ b/components/new-scorecard-form.tsx
+@@ -231,7 +231,7 @@ export function NewScorecardForm({
+       {roundType && !loadingHoles && holes.length > 0 && (
+         <div>
+           <Label>Scores</Label>
+-          <div className="mt-3 rounded-lg border border-border bg-card">
++          <div className="mt-3 overflow-x-auto rounded-lg border border-border bg-card">
+             <div className="grid grid-cols-[3rem_3rem_4rem_1fr] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
+               <span>Hole</span>
+               <span>Par</span>
+@@ -259,7 +259,7 @@ export function NewScorecardForm({
+                       setGrossByHole((prev) => ({ ...prev, [hole.id]: e.target.value }))
+                     }
+                     disabled={pending}
+-                    className="font-numeral h-9 w-24"
++                    className="font-numeral w-full min-w-0"
+                   />
+                 </div>
+               </React.Fragment>
+diff --git a/components/ui/card.tsx b/components/ui/card.tsx
+index 9465024..6fd53b3 100644
+--- a/components/ui/card.tsx
++++ b/components/ui/card.tsx
+@@ -17,7 +17,7 @@ Card.displayName = "Card";
+ 
+ const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+   ({ className, ...props }, ref) => (
+-    <div ref={ref} className={cn("flex flex-col gap-1.5 p-6", className)} {...props} />
++    <div ref={ref} className={cn("flex flex-col gap-1.5 p-4 sm:p-6", className)} {...props} />
+   )
+ );
+ CardHeader.displayName = "CardHeader";
+@@ -38,14 +38,14 @@ CardDescription.displayName = "CardDescription";
+ 
+ const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+   ({ className, ...props }, ref) => (
+-    <div ref={ref} className={cn("p-6 pt-0", className)} {...props} />
++    <div ref={ref} className={cn("p-4 pt-0 sm:p-6 sm:pt-0", className)} {...props} />
+   )
+ );
+ CardContent.displayName = "CardContent";
+ 
+ const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+   ({ className, ...props }, ref) => (
+-    <div ref={ref} className={cn("flex items-center p-6 pt-0", className)} {...props} />
++    <div ref={ref} className={cn("flex items-center p-4 pt-0 sm:p-6 sm:pt-0", className)} {...props} />
+   )
+ );
+ CardFooter.displayName = "CardFooter";
+diff --git a/components/ui/input.tsx b/components/ui/input.tsx
+index 5455737..66fc23b 100644
+--- a/components/ui/input.tsx
++++ b/components/ui/input.tsx
+@@ -7,7 +7,7 @@ const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLI
+       <input
+         type={type}
+         className={cn(
+-          "flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
++          "flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+           className
+         )}
+         ref={ref}

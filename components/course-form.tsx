@@ -144,7 +144,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
           </span>
         </div>
 
-        <div className="rounded-lg border border-border bg-card">
+        <div className="overflow-x-auto rounded-lg border border-border bg-card">
           <div className="grid grid-cols-[3rem_1fr_5rem_5rem_5rem] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
             <span>Hole</span>
             <span>Par</span>
@@ -172,7 +172,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
                   onChange={(e) =>
                     updateHole(index, { strokeIndex: Number(e.target.value) || 0 })
                   }
-                  className="font-numeral h-9"
+                  className="font-numeral"
                   disabled={pending}
                 />
                 <Input
@@ -184,7 +184,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
                       whiteYards: e.target.value ? Number(e.target.value) : null,
                     })
                   }
-                  className="font-numeral h-9"
+                  className="font-numeral"
                   disabled={pending}
                 />
                 <Input
@@ -196,7 +196,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
                       yellowYards: e.target.value ? Number(e.target.value) : null,
                     })
                   }
-                  className="font-numeral h-9"
+                  className="font-numeral"
                   disabled={pending}
                 />
               </div>
