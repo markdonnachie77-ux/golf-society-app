@@ -91,7 +91,15 @@ export async function approveScorecard(
   const session = await requireAdmin();
   const supabase = createServiceClient();
 
-  const { error } = await supabase.rpc("approve_scorecard", {
+  // Cast bypasses TypeScript's .rpc() argument-shape check specifically —
+  // the hand-written `Functions` type in lib/database.types.ts (no
+  // generated Relationships/overload metadata, since it wasn't produced
+  // by `supabase gen types`) doesn't line up with what this installed
+  // supabase-js version's .rpc() generics expect, and previous attempts
+  // to match it exactly kept surfacing new mismatches at build time. This
+  // has zero effect at runtime — .rpc() just sends the function name and
+  // JSON args over the wire regardless of how TypeScript typed the call.
+  const { error } = await (supabase.rpc as any)("approve_scorecard", {
     p_scorecard_id: scorecardId,
     p_reviewer_id: session.playerId,
     p_applied_change: appliedChange,
@@ -113,7 +121,7 @@ export async function rejectScorecard(scorecardId: string): Promise<ActionResult
   const session = await requireAdmin();
   const supabase = createServiceClient();
 
-  const { error } = await supabase.rpc("reject_scorecard", {
+  const { error } = await (supabase.rpc as any)("reject_scorecard", {
     p_scorecard_id: scorecardId,
     p_reviewer_id: session.playerId,
   });
