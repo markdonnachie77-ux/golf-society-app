@@ -257,13 +257,17 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
   const { data, error } = await supabase
     .from("scorecards")
     .select(
-      "id, played_at, status, total_stableford_points, proposed_handicap_change, players(first_name, last_name), courses(name)"
+      "id, played_at, status, total_stableford_points, proposed_handicap_change, players!scorecards_player_id_fkey(first_name, last_name), courses(name)"
     )
     .order("played_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(SOCIETY_FEED_LIMIT);
 
-  if (error || !data) return [];
+  if (error) {
+    console.error("listSocietyRounds query failed:", error);
+    return [];
+  }
+  if (!data) return [];
 
   return data.map((row) => {
     const player = row.players as unknown as { first_name: string; last_name: string } | null;
