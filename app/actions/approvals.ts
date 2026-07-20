@@ -42,9 +42,32 @@ export async function listPendingScorecards(): Promise<PendingScorecardRow[]> {
   }
   if (!data) return [];
 
-  return data.map((row) => {
-    const player = row.players as unknown as { first_name: string; last_name: string } | null;
-    const course = row.courses as unknown as { name: string } | null;
+  // The hand-written Database type (lib/database.types.ts) doesn't declare
+  // foreign-key Relationships metadata, so supabase-js can't infer the
+  // shape of embedded columns like players(...) / courses(...) at all —
+  // TypeScript sees them as not existing on the row, and errors on the
+  // property access itself (a build-only failure `tsx` never caught here,
+  // since it needs full `next build` type-checking with node_modules
+  // present to surface). Casting the whole array to the shape we know the
+  // query actually returns, before touching any property, sidesteps that.
+  interface RawRow {
+    id: string;
+    played_at: string;
+    tee_color: string;
+    round_type: string;
+    total_gross_stroke_play: number | null;
+    total_net_stroke_play: number | null;
+    total_stableford_points: number | null;
+    proposed_handicap_change: number | null;
+    created_at: string;
+    players: { first_name: string; last_name: string } | null;
+    courses: { name: string } | null;
+  }
+  const rows = data as unknown as RawRow[];
+
+  return rows.map((row) => {
+    const player = row.players;
+    const course = row.courses;
     return {
       id: row.id,
       played_at: row.played_at,

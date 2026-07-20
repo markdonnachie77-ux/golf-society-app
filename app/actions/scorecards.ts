@@ -208,9 +208,22 @@ export async function getScorecardDetail(scorecardId: string) {
     .select("id, hole_id, gross_strokes, net_strokes, stableford_points, holes(hole_number, par, stroke_index)")
     .eq("scorecard_id", scorecardId);
 
-  const sortedScores = (scores ?? []).slice().sort((a, b) => {
-    const aNum = (a.holes as unknown as { hole_number: number } | null)?.hole_number ?? 0;
-    const bNum = (b.holes as unknown as { hole_number: number } | null)?.hole_number ?? 0;
+  // See the comment in app/actions/approvals.ts's listPendingScorecards for
+  // why this cast (of the whole array, before any property access) is
+  // needed rather than casting row.holes after accessing it.
+  interface RawScoreRow {
+    id: string;
+    hole_id: string;
+    gross_strokes: number;
+    net_strokes: number;
+    stableford_points: number;
+    holes: { hole_number: number; par: number; stroke_index: number } | null;
+  }
+  const rawScores = (scores ?? []) as unknown as RawScoreRow[];
+
+  const sortedScores = rawScores.slice().sort((a, b) => {
+    const aNum = a.holes?.hole_number ?? 0;
+    const bNum = b.holes?.hole_number ?? 0;
     return aNum - bNum;
   });
 
@@ -269,9 +282,20 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
   }
   if (!data) return [];
 
-  return data.map((row) => {
-    const player = row.players as unknown as { first_name: string; last_name: string } | null;
-    const course = row.courses as unknown as { name: string } | null;
+  interface RawRow {
+    id: string;
+    played_at: string;
+    status: string;
+    total_stableford_points: number | null;
+    proposed_handicap_change: number | null;
+    players: { first_name: string; last_name: string } | null;
+    courses: { name: string } | null;
+  }
+  const rows = data as unknown as RawRow[];
+
+  return rows.map((row) => {
+    const player = row.players;
+    const course = row.courses;
     return {
       id: row.id,
       played_at: row.played_at,

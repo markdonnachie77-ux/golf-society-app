@@ -71,8 +71,17 @@ export async function getPlayerProfile(playerId: string) {
     .order("played_at", { ascending: false })
     .limit(10);
 
-  const recentRounds: RecentRoundRow[] = (roundRows ?? []).map((r) => {
-    const course = r.courses as unknown as { name: string } | null;
+  interface RawRoundRow {
+    id: string;
+    played_at: string;
+    status: string;
+    total_stableford_points: number | null;
+    courses: { name: string } | null;
+  }
+  const rawRoundRows = (roundRows ?? []) as unknown as RawRoundRow[];
+
+  const recentRounds: RecentRoundRow[] = rawRoundRows.map((r) => {
+    const course = r.courses;
     return {
       id: r.id,
       playedAt: r.played_at,
