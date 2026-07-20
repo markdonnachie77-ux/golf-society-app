@@ -212,5 +212,20 @@ export async function getScorecardDetail(scorecardId: string) {
     return aNum - bNum;
   });
 
-  return { scorecard, course, scores: sortedScores };
+  // proposed_handicap_change on the scorecard itself is never mutated by an
+  // admin override (see supabase/migrations/0008_approval_functions.sql) —
+  // it's kept as the original calculated proposal for audit purposes. If
+  // this round was approved, the actually-applied amount lives on the
+  // handicap_history row the approval created instead.
+  let appliedChange: number | null = null;
+  if (scorecard.status === "approved") {
+    const { data: historyRow } = await supabase
+      .from("handicap_history")
+      .select("adjustment_amount")
+      .eq("scorecard_id", scorecardId)
+      .maybeSingle();
+    appliedChange = historyRow?.adjustment_amount ?? null;
+  }
+
+  return { scorecard, course, scores: sortedScores, appliedChange };
 }

@@ -153,5 +153,22 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["handicap_history"]["Insert"]>;
       };
     };
+    Functions: {
+      approve_scorecard: {
+        Args: {
+          p_scorecard_id: string;
+          p_reviewer_id: string;
+          p_applied_change: number;
+        };
+        Returns: { new_handicap: number }[];
+      };
+      reject_scorecard: {
+        Args: {
+          p_scorecard_id: string;
+          p_reviewer_id: string;
+        };
+        Returns: undefined;
+      };
+    };
   };
 }

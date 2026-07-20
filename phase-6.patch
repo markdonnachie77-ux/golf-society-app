@@ -1,0 +1,604 @@
+diff --git a/README.md b/README.md
+index d2ac6e8..6623c1c 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # Golf Society & Handicap Tracker
+ 
+-Status: **Phase 1–5 complete** (of the 7-phase roadmap in `SPEC.md`).
++Status: **Phase 1–6 complete** (of the 7-phase roadmap in `SPEC.md`).
+ 
+ - ✅ Phase 1 — Next.js (App Router, TS) project skeleton, Tailwind + Shadcn-style
+   UI primitives, full Supabase SQL migrations for every table, hand-written
+@@ -22,7 +22,16 @@ Status: **Phase 1–5 complete** (of the 7-phase roadmap in `SPEC.md`).
+   handicap-change preview computed with the same `lib/golf-math.ts` used
+   server-side. Submits as `pending_approval`; `/rounds/[id]` shows the
+   saved scorecard with its status.
+-- ⏳ Phase 6–7 — approval queue, player profile/timeline. Not yet built.
++- ✅ Phase 6 — admin approval queue (`/admin/approvals`): lists pending
++  scorecards oldest-first; clicking one opens the existing `/rounds/[id]`
++  detail view (reused rather than duplicated) with an admin panel to
++  approve, override the proposed handicap change and approve, or reject.
++  Approve/reject run as atomic Postgres functions
++  (`supabase/migrations/0008_approval_functions.sql`) — status update,
++  `players.current_handicap` update, and the `handicap_history` insert all
++  happen in one transaction, and re-check the scorecard is still pending
++  before acting (so two admins can't double-approve the same round).
++- ⏳ Phase 7 — player profile & handicap timeline chart. Not yet built.
+ 
+ ## 1. Install dependencies
+ 
+@@ -148,6 +157,25 @@ assumptions the spec didn't pin down explicitly — both flagged with an
+ - Stableford points flatten at 5 for anything better than an albatross
+   (net −3), since the spec's table doesn't define a rate beyond that.
+ 
++## Applying a new migration without wiping your local data
++
++`npx supabase db reset` re-applies every migration from scratch — great for
++a clean slate, but it also deletes whatever players/courses/rounds you've
++already created for testing. Once you have real test data you want to
++keep, apply just the new migration file instead:
++
++```bash
++npx supabase status   # confirms the local stack is running, shows the DB URL
++psql "$(npx supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')" \
++  -f supabase/migrations/0008_approval_functions.sql
++```
++
++Or simpler: open Studio (`http://127.0.0.1:54323`) → SQL Editor → paste the
++contents of the new migration file → Run. Either way, only run *new*
++migration files this way — re-running an already-applied one is usually
++harmless here (everything uses `create or replace function` / `if not
++exists` patterns) but isn't guaranteed for every migration going forward.
++
+ ## Notes on what's deliberately simplified for now
+ 
+ - **Rate limiting** (`lib/rate-limit.ts`) is in-memory, per-process. Fine for
+@@ -172,3 +200,19 @@ assumptions the spec didn't pin down explicitly — both flagged with an
+   — the spec doesn't define a slope/rating model, so the form just defaults
+   it to the player's current handicap and lets them override it manually
+   (e.g. if their handicap changed since their last approved round).
++- **No rejection reason field.** The spec's `scorecards` schema has no
++  column for one, so a rejected round just flips to `status: 'rejected'`
++  with no stored explanation. If your society wants admins to leave a note
++  (e.g. "wrong tee selected, please resubmit"), that'd need a schema change
++  — flagging it here since it's a plausible real-world ask, not something
++  I quietly decided not to build.
++- **No notification to the player when their round is approved/rejected.**
++  They'll see the updated status next time they visit `/rounds/[id]` or
++  their dashboard, but nothing actively tells them. Not in the spec's
++  roadmap, so not built.
++- **An admin override never rewrites `scorecards.proposed_handicap_change`**
++  — that column stays as the original calculated proposal for audit
++  purposes. The actually-applied amount (which may differ, if overridden)
++  lives on the `handicap_history` row the approval creates instead. Worth
++  knowing if you ever query `scorecards` directly expecting it to reflect
++  what was actually approved.
+diff --git a/app/actions/approvals.ts b/app/actions/approvals.ts
+new file mode 100644
+index 0000000..e747f6c
+--- /dev/null
++++ b/app/actions/approvals.ts
+@@ -0,0 +1,99 @@
++"use server";
++
++import { revalidatePath } from "next/cache";
++import { requireAdmin } from "@/lib/auth";
++import { createServiceClient } from "@/lib/supabase/server";
++import type { ActionResult } from "@/app/actions/auth";
++
++export interface PendingScorecardRow {
++  id: string;
++  played_at: string;
++  tee_color: string;
++  round_type: string;
++  total_gross_stroke_play: number | null;
++  total_net_stroke_play: number | null;
++  total_stableford_points: number | null;
++  proposed_handicap_change: number | null;
++  created_at: string;
++  player_name: string;
++  course_name: string;
++}
++
++export async function listPendingScorecards(): Promise<PendingScorecardRow[]> {
++  await requireAdmin();
++  const supabase = createServiceClient();
++
++  const { data, error } = await supabase
++    .from("scorecards")
++    .select(
++      "id, played_at, tee_color, round_type, total_gross_stroke_play, total_net_stroke_play, total_stableford_points, proposed_handicap_change, created_at, players(first_name, last_name), courses(name)"
++    )
++    .eq("status", "pending_approval")
++    .order("created_at", { ascending: true });
++
++  if (error || !data) return [];
++
++  return data.map((row) => {
++    const player = row.players as unknown as { first_name: string; last_name: string } | null;
++    const course = row.courses as unknown as { name: string } | null;
++    return {
++      id: row.id,
++      played_at: row.played_at,
++      tee_color: row.tee_color,
++      round_type: row.round_type,
++      total_gross_stroke_play: row.total_gross_stroke_play,
++      total_net_stroke_play: row.total_net_stroke_play,
++      total_stableford_points: row.total_stableford_points,
++      proposed_handicap_change: row.proposed_handicap_change,
++      created_at: row.created_at,
++      player_name: player ? `${player.first_name} ${player.last_name}` : "Unknown player",
++      course_name: course?.name ?? "Unknown course",
++    };
++  });
++}
++
++export async function approveScorecard(
++  scorecardId: string,
++  appliedChange: number
++): Promise<ActionResult> {
++  const session = await requireAdmin();
++  const supabase = createServiceClient();
++
++  const { error } = await supabase.rpc("approve_scorecard", {
++    p_scorecard_id: scorecardId,
++    p_reviewer_id: session.playerId,
++    p_applied_change: appliedChange,
++  });
++
++  if (error) {
++    return {
++      ok: false,
++      error: error.message || "Could not approve this scorecard. It may have already been reviewed.",
++    };
++  }
++
++  revalidatePath("/admin/approvals");
++  revalidatePath(`/rounds/${scorecardId}`);
++  return { ok: true };
++}
++
++export async function rejectScorecard(scorecardId: string): Promise<ActionResult> {
++  const session = await requireAdmin();
++  const supabase = createServiceClient();
++
++  const { error } = await supabase.rpc("reject_scorecard", {
++    p_scorecard_id: scorecardId,
++    p_reviewer_id: session.playerId,
++  });
++
++  if (error) {
++    return {
++      ok: false,
++      error: error.message || "Could not reject this scorecard. It may have already been reviewed.",
++    };
++  }
++
++  revalidatePath("/admin/approvals");
++  revalidatePath(`/rounds/${scorecardId}`);
++  return { ok: true };
++}
+diff --git a/app/actions/scorecards.ts b/app/actions/scorecards.ts
+index 29e74eb..f86431f 100644
+--- a/app/actions/scorecards.ts
++++ b/app/actions/scorecards.ts
+@@ -212,5 +212,20 @@ export async function getScorecardDetail(scorecardId: string) {
+     return aNum - bNum;
+   });
+ 
+-  return { scorecard, course, scores: sortedScores };
++  // proposed_handicap_change on the scorecard itself is never mutated by an
++  // admin override (see supabase/migrations/0008_approval_functions.sql) —
++  // it's kept as the original calculated proposal for audit purposes. If
++  // this round was approved, the actually-applied amount lives on the
++  // handicap_history row the approval created instead.
++  let appliedChange: number | null = null;
++  if (scorecard.status === "approved") {
++    const { data: historyRow } = await supabase
++      .from("handicap_history")
++      .select("adjustment_amount")
++      .eq("scorecard_id", scorecardId)
++      .maybeSingle();
++    appliedChange = historyRow?.adjustment_amount ?? null;
++  }
++
++  return { scorecard, course, scores: sortedScores, appliedChange };
+ }
+diff --git a/app/admin/approvals/page.tsx b/app/admin/approvals/page.tsx
+index 7d90351..b7d6411 100644
+--- a/app/admin/approvals/page.tsx
++++ b/app/admin/approvals/page.tsx
+@@ -1,16 +1,60 @@
++import Link from "next/link";
+ import { requireAdmin } from "@/lib/auth";
++import { listPendingScorecards } from "@/app/actions/approvals";
++import { Card, CardContent } from "@/components/ui/card";
+ 
+ export default async function AdminApprovalsPage() {
+   await requireAdmin();
++  const pending = await listPendingScorecards();
+ 
+   return (
+     <main className="min-h-screen bg-background px-4 py-12">
+-      <div className="mx-auto max-w-2xl">
+-        <h1 className="font-display text-3xl font-semibold">Approval queue</h1>
+-        <p className="mt-2 text-sm text-muted-foreground">
+-          Built in Phase 6 — pending scorecards will list here for approve /
+-          override / reject.
+-        </p>
++      <div className="mx-auto max-w-3xl">
++        <div className="mb-8">
++          <p className="font-numeral text-xs uppercase tracking-widest text-accent">
++            Society Handicap Register
++          </p>
++          <h1 className="font-display mt-1 text-3xl font-semibold">Approval queue</h1>
++          <p className="mt-1 text-sm text-muted-foreground">
++            {pending.length === 0
++              ? "Nothing waiting on you."
++              : `${pending.length} scorecard${pending.length === 1 ? "" : "s"} awaiting review, oldest first.`}
++          </p>
++        </div>
++
++        {pending.length === 0 ? (
++          <Card>
++            <CardContent className="py-10 text-center text-muted-foreground">
++              All caught up.
++            </CardContent>
++          </Card>
++        ) : (
++          <div className="rounded-lg border border-border bg-card">
++            {pending.map((row, i) => (
++              <div key={row.id}>
++                {i > 0 && <div className="ledger-rule" />}
++                <Link
++                  href={`/rounds/${row.id}`}
++                  className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-secondary"
++                >
++                  <div>
++                    <p className="font-medium">{row.player_name}</p>
++                    <p className="text-sm text-muted-foreground">
++                      {row.course_name} · {new Date(row.played_at).toLocaleDateString()}
++                    </p>
++                  </div>
++                  <div className="text-right font-numeral text-sm">
++                    <p>{row.total_stableford_points} pts</p>
++                    <p className="text-muted-foreground">
++                      {row.proposed_handicap_change! > 0 ? "+" : ""}
++                      {row.proposed_handicap_change}
++                    </p>
++                  </div>
++                </Link>
++              </div>
++            ))}
++          </div>
++        )}
+       </div>
+     </main>
+   );
+diff --git a/app/dashboard/page.tsx b/app/dashboard/page.tsx
+index daf5402..60bd787 100644
+--- a/app/dashboard/page.tsx
++++ b/app/dashboard/page.tsx
+@@ -32,9 +32,14 @@ export default async function DashboardPage() {
+               <Link href="/rounds/new">Log a round</Link>
+             </Button>
+             {player?.role === "admin" && (
+-              <Button asChild variant="outline" size="sm">
+-                <Link href="/courses">Courses</Link>
+-              </Button>
++              <>
++                <Button asChild variant="outline" size="sm">
++                  <Link href="/admin/approvals">Approvals</Link>
++                </Button>
++                <Button asChild variant="outline" size="sm">
++                  <Link href="/courses">Courses</Link>
++                </Button>
++              </>
+             )}
+             <form action={logout}>
+               <Button type="submit" variant="outline" size="sm">
+diff --git a/app/rounds/[id]/page.tsx b/app/rounds/[id]/page.tsx
+index 71a3faa..c1a51eb 100644
+--- a/app/rounds/[id]/page.tsx
++++ b/app/rounds/[id]/page.tsx
+@@ -1,6 +1,8 @@
+ import { notFound } from "next/navigation";
+ import Link from "next/link";
++import { requireSession } from "@/lib/auth";
+ import { getScorecardDetail } from "@/app/actions/scorecards";
++import { AdminApprovalPanel } from "@/components/admin-approval-panel";
+ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+ import { Button } from "@/components/ui/button";
+ import { cn } from "@/lib/utils";
+@@ -32,13 +34,14 @@ export default async function ScorecardDetailPage({
+   params: Promise<{ id: string }>;
+ }) {
+   const { id } = await params;
++  const session = await requireSession();
+   const result = await getScorecardDetail(id);
+ 
+   if (!result) {
+     notFound();
+   }
+ 
+-  const { scorecard, course, scores } = result;
++  const { scorecard, course, scores, appliedChange } = result;
+   const rows = scores as unknown as ScoreRow[];
+ 
+   return (
+@@ -93,14 +96,21 @@ export default async function ScorecardDetailPage({
+                   scorecard.proposed_handicap_change! > 0 ? "+" : ""
+                 }${scorecard.proposed_handicap_change}`}
+               {scorecard.status === "approved" &&
+-                `Applied handicap change: ${
+-                  scorecard.proposed_handicap_change! > 0 ? "+" : ""
+-                }${scorecard.proposed_handicap_change}`}
++                `Applied handicap change: ${appliedChange! > 0 ? "+" : ""}${appliedChange}`}
+               {scorecard.status === "rejected" && "This round was rejected — no handicap change was applied."}
+             </p>
+           </CardContent>
+         </Card>
+ 
++        {session.role === "admin" && scorecard.status === "pending_approval" && (
++          <div className="mt-6">
++            <AdminApprovalPanel
++              scorecardId={scorecard.id}
++              proposedChange={scorecard.proposed_handicap_change ?? 0}
++            />
++          </div>
++        )}
++
+         <div className="mt-6 rounded-lg border border-border bg-card">
+           <div className="grid grid-cols-[3rem_3rem_3rem_3rem_3rem_1fr] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
+             <span>Hole</span>
+diff --git a/components/admin-approval-panel.tsx b/components/admin-approval-panel.tsx
+new file mode 100644
+index 0000000..67e32f7
+--- /dev/null
++++ b/components/admin-approval-panel.tsx
+@@ -0,0 +1,97 @@
++"use client";
++
++import * as React from "react";
++import { useRouter } from "next/navigation";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { Label } from "@/components/ui/label";
++import { approveScorecard, rejectScorecard } from "@/app/actions/approvals";
++
++export function AdminApprovalPanel({
++  scorecardId,
++  proposedChange,
++}: {
++  scorecardId: string;
++  proposedChange: number;
++}) {
++  const router = useRouter();
++  const [appliedChange, setAppliedChange] = React.useState(String(proposedChange));
++  const [error, setError] = React.useState<string | null>(null);
++  const [pending, setPending] = React.useState<"approve" | "reject" | null>(null);
++
++  const isOverride = Number(appliedChange) !== proposedChange;
++
++  async function handleApprove() {
++    setError(null);
++    const value = Number(appliedChange);
++    if (Number.isNaN(value)) {
++      setError("Enter a valid number for the handicap change.");
++      return;
++    }
++    setPending("approve");
++    const result = await approveScorecard(scorecardId, value);
++    if (!result.ok) {
++      setError(result.error ?? "Something went wrong.");
++      setPending(null);
++      return;
++    }
++    router.push("/admin/approvals");
++  }
++
++  async function handleReject() {
++    setError(null);
++    setPending("reject");
++    const result = await rejectScorecard(scorecardId);
++    if (!result.ok) {
++      setError(result.error ?? "Something went wrong.");
++      setPending(null);
++      return;
++    }
++    router.push("/admin/approvals");
++  }
++
++  return (
++    <div className="rounded-lg border border-accent/40 bg-accent/5 p-5">
++      <p className="text-xs uppercase tracking-widest text-accent">Admin review</p>
++
++      <div className="mt-4 space-y-1.5">
++        <Label htmlFor="appliedChange">Handicap change to apply</Label>
++        <Input
++          id="appliedChange"
++          type="number"
++          step="0.01"
++          value={appliedChange}
++          onChange={(e) => setAppliedChange(e.target.value)}
++          disabled={pending !== null}
++          className="font-numeral w-32"
++        />
++        <p className="text-xs text-muted-foreground">
++          Proposed: {proposedChange > 0 ? "+" : ""}
++          {proposedChange}
++          {isOverride && " — editing this overrides the proposed amount"}
++        </p>
++      </div>
++
++      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
++
++      <div className="mt-5 flex gap-3">
++        <Button
++          type="button"
++          variant="accent"
++          onClick={handleApprove}
++          disabled={pending !== null}
++        >
++          {pending === "approve" ? "Approving…" : isOverride ? "Override & approve" : "Approve"}
++        </Button>
++        <Button
++          type="button"
++          variant="destructive"
++          onClick={handleReject}
++          disabled={pending !== null}
++        >
++          {pending === "reject" ? "Rejecting…" : "Reject"}
++        </Button>
++      </div>
++    </div>
++  );
++}
+diff --git a/lib/database.types.ts b/lib/database.types.ts
+index cc01dff..dcd7ec9 100644
+--- a/lib/database.types.ts
++++ b/lib/database.types.ts
+@@ -153,5 +153,22 @@ export interface Database {
+         Update: Partial<Database["public"]["Tables"]["handicap_history"]["Insert"]>;
+       };
+     };
++    Functions: {
++      approve_scorecard: {
++        Args: {
++          p_scorecard_id: string;
++          p_reviewer_id: string;
++          p_applied_change: number;
++        };
++        Returns: { new_handicap: number }[];
++      };
++      reject_scorecard: {
++        Args: {
++          p_scorecard_id: string;
++          p_reviewer_id: string;
++        };
++        Returns: undefined;
++      };
++    };
+   };
+ }
+diff --git a/supabase/migrations/0008_approval_functions.sql b/supabase/migrations/0008_approval_functions.sql
+new file mode 100644
+index 0000000..c02c61c
+--- /dev/null
++++ b/supabase/migrations/0008_approval_functions.sql
+@@ -0,0 +1,114 @@
++-- 0008_approval_functions.sql
++--
++-- Approving a scorecard touches three things that must succeed or fail
++-- together: the scorecard's status, the player's current_handicap, and a
++-- new handicap_history row. Doing this as three separate supabase-js calls
++-- from a Server Action has no real rollback if the second or third call
++-- fails — a Postgres function is a single transaction by default, so this
++-- is the correct place for one rather than hand-rolled compensating
++-- deletes (which is what we settled for in courses/scorecards inserts,
++-- where a partial failure just means "delete what we already inserted").
++--
++-- Both functions lock the scorecard row (FOR UPDATE) and re-check its
++-- status before acting, so two admins clicking "approve" on the same
++-- pending scorecard at the same moment can't double-apply a handicap
++-- change — the second call will simply fail with "not pending approval."
++
++create or replace function approve_scorecard(
++  p_scorecard_id uuid,
++  p_reviewer_id uuid,
++  p_applied_change numeric
++)
++returns table (new_handicap numeric) as $$
++declare
++  v_status text;
++  v_player_id uuid;
++  v_course_id uuid;
++  v_proposed_change numeric;
++  v_course_name text;
++  v_current_handicap numeric;
++  v_new_handicap numeric;
++  v_notes text;
++begin
++  select status, player_id, course_id, proposed_handicap_change
++    into v_status, v_player_id, v_course_id, v_proposed_change
++  from scorecards
++  where id = p_scorecard_id
++  for update;
++
++  if v_status is null then
++    raise exception 'Scorecard % not found', p_scorecard_id;
++  end if;
++
++  if v_status <> 'pending_approval' then
++    raise exception 'Scorecard % is not pending approval (status: %)', p_scorecard_id, v_status;
++  end if;
++
++  select current_handicap into v_current_handicap
++  from players
++  where id = v_player_id
++  for update;
++
++  select name into v_course_name from courses where id = v_course_id;
++
++  v_new_handicap := round((v_current_handicap + p_applied_change)::numeric, 1);
++
++  if p_applied_change is distinct from v_proposed_change then
++    v_notes := format(
++      'Round at %s — approved with override (proposed %s, applied %s)',
++      coalesce(v_course_name, 'unknown course'), v_proposed_change, p_applied_change
++    );
++  else
++    v_notes := format('Round at %s — approved', coalesce(v_course_name, 'unknown course'));
++  end if;
++
++  update players
++  set current_handicap = v_new_handicap
++  where id = v_player_id;
++
++  update scorecards
++  set status = 'approved',
++      reviewed_by = p_reviewer_id,
++      reviewed_at = now()
++  where id = p_scorecard_id;
++
++  insert into handicap_history (player_id, scorecard_id, handicap_value, adjustment_amount, effective_date, notes)
++  values (v_player_id, p_scorecard_id, v_new_handicap, p_applied_change, now(), v_notes);
++
++  return query select v_new_handicap;
++end;
++$$ language plpgsql;
++
++create or replace function reject_scorecard(
++  p_scorecard_id uuid,
++  p_reviewer_id uuid
++)
++returns void as $$
++declare
++  v_status text;
++begin
++  select status into v_status from scorecards where id = p_scorecard_id for update;
++
++  if v_status is null then
++    raise exception 'Scorecard % not found', p_scorecard_id;
++  end if;
++
++  if v_status <> 'pending_approval' then
++    raise exception 'Scorecard % is not pending approval (status: %)', p_scorecard_id, v_status;
++  end if;
++
++  update scorecards
++  set status = 'rejected',
++      reviewed_by = p_reviewer_id,
++      reviewed_at = now()
++  where id = p_scorecard_id;
++end;
++$$ language plpgsql;
++
++-- Postgres grants EXECUTE on new functions to PUBLIC by default — unlike
++-- the table grants in 0007, this isn't something the RLS revoke already
++-- covers, so it needs its own explicit revoke. Only the service role
++-- (used exclusively server-side, see lib/supabase/server.ts) ever calls
++-- these.
++revoke execute on function approve_scorecard(uuid, uuid, numeric) from public;
++revoke execute on function reject_scorecard(uuid, uuid) from public;

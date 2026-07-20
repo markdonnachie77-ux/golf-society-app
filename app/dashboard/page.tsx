@@ -32,9 +32,14 @@ export default async function DashboardPage() {
               <Link href="/rounds/new">Log a round</Link>
             </Button>
             {player?.role === "admin" && (
-              <Button asChild variant="outline" size="sm">
-                <Link href="/courses">Courses</Link>
-              </Button>
+              <>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/admin/approvals">Approvals</Link>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/courses">Courses</Link>
+                </Button>
+              </>
             )}
             <form action={logout}>
               <Button type="submit" variant="outline" size="sm">

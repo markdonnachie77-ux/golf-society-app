@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { requireSession } from "@/lib/auth";
 import { getScorecardDetail } from "@/app/actions/scorecards";
+import { AdminApprovalPanel } from "@/components/admin-approval-panel";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,13 +34,14 @@ export default async function ScorecardDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const session = await requireSession();
   const result = await getScorecardDetail(id);
 
   if (!result) {
     notFound();
   }
 
-  const { scorecard, course, scores } = result;
+  const { scorecard, course, scores, appliedChange } = result;
   const rows = scores as unknown as ScoreRow[];
 
   return (
@@ -93,13 +96,20 @@ export default async function ScorecardDetailPage({
                   scorecard.proposed_handicap_change! > 0 ? "+" : ""
                 }${scorecard.proposed_handicap_change}`}
               {scorecard.status === "approved" &&
-                `Applied handicap change: ${
-                  scorecard.proposed_handicap_change! > 0 ? "+" : ""
-                }${scorecard.proposed_handicap_change}`}
+                `Applied handicap change: ${appliedChange! > 0 ? "+" : ""}${appliedChange}`}
               {scorecard.status === "rejected" && "This round was rejected — no handicap change was applied."}
             </p>
           </CardContent>
         </Card>
+
+        {session.role === "admin" && scorecard.status === "pending_approval" && (
+          <div className="mt-6">
+            <AdminApprovalPanel
+              scorecardId={scorecard.id}
+              proposedChange={scorecard.proposed_handicap_change ?? 0}
+            />
+          </div>
+        )}
 
         <div className="mt-6 rounded-lg border border-border bg-card">
           <div className="grid grid-cols-[3rem_3rem_3rem_3rem_3rem_1fr] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">

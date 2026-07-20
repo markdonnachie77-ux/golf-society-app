@@ -1,6 +1,6 @@
 # Golf Society & Handicap Tracker
 
-Status: **Phase 1–5 complete** (of the 7-phase roadmap in `SPEC.md`).
+Status: **Phase 1–6 complete** (of the 7-phase roadmap in `SPEC.md`).
 
 - ✅ Phase 1 — Next.js (App Router, TS) project skeleton, Tailwind + Shadcn-style
   UI primitives, full Supabase SQL migrations for every table, hand-written
@@ -22,7 +22,16 @@ Status: **Phase 1–5 complete** (of the 7-phase roadmap in `SPEC.md`).
   handicap-change preview computed with the same `lib/golf-math.ts` used
   server-side. Submits as `pending_approval`; `/rounds/[id]` shows the
   saved scorecard with its status.
-- ⏳ Phase 6–7 — approval queue, player profile/timeline. Not yet built.
+- ✅ Phase 6 — admin approval queue (`/admin/approvals`): lists pending
+  scorecards oldest-first; clicking one opens the existing `/rounds/[id]`
+  detail view (reused rather than duplicated) with an admin panel to
+  approve, override the proposed handicap change and approve, or reject.
+  Approve/reject run as atomic Postgres functions
+  (`supabase/migrations/0008_approval_functions.sql`) — status update,
+  `players.current_handicap` update, and the `handicap_history` insert all
+  happen in one transaction, and re-check the scorecard is still pending
+  before acting (so two admins can't double-approve the same round).
+- ⏳ Phase 7 — player profile & handicap timeline chart. Not yet built.
 
 ## 1. Install dependencies
 
@@ -148,6 +157,25 @@ assumptions the spec didn't pin down explicitly — both flagged with an
 - Stableford points flatten at 5 for anything better than an albatross
   (net −3), since the spec's table doesn't define a rate beyond that.
 
+## Applying a new migration without wiping your local data
+
+`npx supabase db reset` re-applies every migration from scratch — great for
+a clean slate, but it also deletes whatever players/courses/rounds you've
+already created for testing. Once you have real test data you want to
+keep, apply just the new migration file instead:
+
+```bash
+npx supabase status   # confirms the local stack is running, shows the DB URL
+psql "$(npx supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')" \
+  -f supabase/migrations/0008_approval_functions.sql
+```
+
+Or simpler: open Studio (`http://127.0.0.1:54323`) → SQL Editor → paste the
+contents of the new migration file → Run. Either way, only run *new*
+migration files this way — re-running an already-applied one is usually
+harmless here (everything uses `create or replace function` / `if not
+exists` patterns) but isn't guaranteed for every migration going forward.
+
 ## Notes on what's deliberately simplified for now
 
 - **Rate limiting** (`lib/rate-limit.ts`) is in-memory, per-process. Fine for
@@ -172,3 +200,19 @@ assumptions the spec didn't pin down explicitly — both flagged with an
   — the spec doesn't define a slope/rating model, so the form just defaults
   it to the player's current handicap and lets them override it manually
   (e.g. if their handicap changed since their last approved round).
+- **No rejection reason field.** The spec's `scorecards` schema has no
+  column for one, so a rejected round just flips to `status: 'rejected'`
+  with no stored explanation. If your society wants admins to leave a note
+  (e.g. "wrong tee selected, please resubmit"), that'd need a schema change
+  — flagging it here since it's a plausible real-world ask, not something
+  I quietly decided not to build.
+- **No notification to the player when their round is approved/rejected.**
+  They'll see the updated status next time they visit `/rounds/[id]` or
+  their dashboard, but nothing actively tells them. Not in the spec's
+  roadmap, so not built.
+- **An admin override never rewrites `scorecards.proposed_handicap_change`**
+  — that column stays as the original calculated proposal for audit
+  purposes. The actually-applied amount (which may differ, if overridden)
+  lives on the `handicap_history` row the approval creates instead. Worth
+  knowing if you ever query `scorecards` directly expecting it to reflect
+  what was actually approved.
