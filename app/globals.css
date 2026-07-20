@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Design direction: "Clubhouse ledger"
+  — parchment scorecard paper, deep fairway green, brass accent, ink navy.
+  Display face: a slab/serif for headers (evokes the clubhouse noticeboard).
+  Body: a clean grotesk. Numerals: tabular monospace, like a printed scorecard.
+*/
+
+:root {
+  --background: 42 38% 95%;        /* parchment */
+  --foreground: 158 45% 12%;       /* deep fairway ink */
+
+  --card: 42 32% 98%;
+  --card-foreground: 158 45% 12%;
+
+  --primary: 158 45% 22%;          /* fairway green */
+  --primary-foreground: 42 38% 96%;
+
+  --secondary: 36 30% 88%;
+  --secondary-foreground: 158 45% 16%;
+
+  --accent: 38 55% 48%;            /* brass */
+  --accent-foreground: 42 40% 98%;
+
+  --muted: 40 20% 90%;
+  --muted-foreground: 158 15% 38%;
+
+  --destructive: 4 62% 42%;
+  --destructive-foreground: 42 40% 98%;
+
+  --border: 40 22% 82%;
+  --input: 40 22% 82%;
+  --ring: 158 45% 22%;
+
+  --radius: 0.4rem;
+}
+
+.dark {
+  --background: 158 30% 8%;
+  --foreground: 42 30% 92%;
+  --card: 158 28% 11%;
+  --card-foreground: 42 30% 92%;
+  --primary: 42 40% 70%;
+  --primary-foreground: 158 45% 12%;
+  --secondary: 158 20% 16%;
+  --secondary-foreground: 42 30% 92%;
+  --accent: 38 55% 55%;
+  --accent-foreground: 158 45% 10%;
+  --muted: 158 15% 18%;
+  --muted-foreground: 42 15% 65%;
+  --destructive: 4 55% 48%;
+  --destructive-foreground: 42 30% 92%;
+  --border: 158 15% 20%;
+  --input: 158 15% 20%;
+  --ring: 42 40% 70%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+  .font-numeral {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Scorecard hairline rules, used instead of heavy card borders */
+.ledger-rule {
+  background-image: repeating-linear-gradient(
+    to right,
+    hsl(var(--border)) 0,
+    hsl(var(--border)) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  height: 1px;
+}

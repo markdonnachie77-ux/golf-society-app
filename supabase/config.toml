@@ -1,0 +1,35 @@
+project_id = "golf-society-app"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+# Auth/Storage/Realtime/Edge Functions are disabled — this app uses a custom
+# 4-digit PIN login (see lib/auth.ts), not Supabase Auth, and doesn't use
+# Storage or Realtime. Keeping these off means fewer containers to boot on a
+# lower-powered machine like a Chromebook.
+[auth]
+enabled = false
+
+[storage]
+enabled = false
+
+[realtime]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false
