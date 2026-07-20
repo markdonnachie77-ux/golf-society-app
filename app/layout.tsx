@@ -22,6 +22,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://evsgolfsociety.co.uk"),
   title: SOCIETY_NAME,
   description: `${SOCIETY_NAME} handicap tracking & scorecards`,
   openGraph: {

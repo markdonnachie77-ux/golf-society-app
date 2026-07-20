@@ -1,0 +1,12 @@
+diff --git a/app/layout.tsx b/app/layout.tsx
+index 950754f..5388add 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -22,6 +22,7 @@ const mono = JetBrains_Mono({
+ });
+ 
+ export const metadata: Metadata = {
++  metadataBase: new URL("https://evsgolfsociety.co.uk"),
+   title: SOCIETY_NAME,
+   description: `${SOCIETY_NAME} handicap tracking & scorecards`,
+   openGraph: {
