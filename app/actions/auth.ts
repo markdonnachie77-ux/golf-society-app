@@ -165,6 +165,8 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
 // ---------- Logout ----------
 
 export async function logout() {
+  const societyId = await getCurrentSocietyId();
+  console.log(`[logout] running with societyId=${societyId}`);
   await clearSessionCookie();
   redirect("/login");
 }

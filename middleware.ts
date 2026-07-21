@@ -134,8 +134,9 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const hostHeader = request.headers.get("host") ?? "";
+  const userAgent = request.headers.get("user-agent") ?? "unknown";
   const resolved = await resolveSociety(hostHeader);
-  console.log(`[tenant] host="${hostHeader}" path="${pathname}" -> resolved=`, resolved);
+  console.log(`[tenant] host="${hostHeader}" path="${pathname}" ua="${userAgent}" -> resolved=`, resolved);
   if (resolved === null) {
     return new NextResponse("Society not found", { status: 404 });
   }
