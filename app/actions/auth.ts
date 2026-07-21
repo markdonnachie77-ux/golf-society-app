@@ -11,6 +11,7 @@ import {
   clearSessionCookie,
 } from "@/lib/auth";
 import { checkLoginRateLimit, resetLoginRateLimit } from "@/lib/rate-limit";
+import { getCurrentSocietyId } from "@/lib/tenant";
 
 // ---------- Register ----------
 
@@ -66,6 +67,7 @@ export async function registerPlayer(formData: FormData): Promise<ActionResult> 
     };
   }
 
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
   const pinHash = await hashPin(data.pin);
 
@@ -78,6 +80,11 @@ export async function registerPlayer(formData: FormData): Promise<ActionResult> 
       current_handicap: data.initialHandicap,
       pin_hash: pinHash,
       role: "player",
+      // Explicit, not left to the column's DB default — the default only
+      // covers the one original society. A real registration must always
+      // be stamped with whichever society this request actually resolved
+      // to, so it's correct the moment a second tenant exists.
+      society_id: societyId,
     })
     .select("id, role")
     .single();
@@ -86,7 +93,7 @@ export async function registerPlayer(formData: FormData): Promise<ActionResult> 
     return { ok: false, error: "Could not create your player profile. Please try again." };
   }
 
-  const token = await createSessionToken({ playerId: player.id, role: player.role });
+  const token = await createSessionToken({ playerId: player.id, role: player.role, societyId });
   await setSessionCookie(token);
 
   redirect("/dashboard");
@@ -122,13 +129,23 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
   }
 
   const supabase = createServiceClient();
+  const societyId = await getCurrentSocietyId();
+
   const { data: player, error } = await supabase
     .from("players")
-    .select("id, pin_hash, role")
+    .select("id, pin_hash, role, society_id")
     .eq("id", playerId)
     .single();
 
   if (error || !player) {
+    return { ok: false, error: "Player not found." };
+  }
+
+  // Same error message as "doesn't exist at all" rather than something
+  // more specific — a player belonging to a different society shouldn't
+  // learn that their id exists elsewhere just by trying to log in with it
+  // on the wrong tenant's subdomain.
+  if (player.society_id !== societyId) {
     return { ok: false, error: "Player not found." };
   }
 
@@ -139,7 +156,7 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
 
   resetLoginRateLimit(playerId);
 
-  const token = await createSessionToken({ playerId: player.id, role: player.role });
+  const token = await createSessionToken({ playerId: player.id, role: player.role, societyId });
   await setSessionCookie(token);
 
   redirect("/dashboard");
@@ -155,10 +172,12 @@ export async function logout() {
 // ---------- Player list for the login page selector ----------
 
 export async function listPlayersForLogin() {
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("players")
     .select("id, first_name, last_name")
+    .eq("society_id", societyId)
     .order("last_name", { ascending: true });
 
   if (error) return [];

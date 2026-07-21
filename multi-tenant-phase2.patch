@@ -1,0 +1,281 @@
+diff --git a/README.md b/README.md
+index f92d03e..b414f32 100644
+--- a/README.md
++++ b/README.md
+@@ -271,6 +271,53 @@ subdomain testing works with zero configuration, per the comments in
+ filters by `society_id`. Every page still shows the same data regardless
+ of which hostname resolved — that's the next, much larger piece of work.
+ 
++### Phase 2 status: auth becomes tenant-aware (in progress, `feature/multi-tenant` branch)
++
++Built on top of Phase 1:
++
++- **`SessionPayload` gains `societyId`.** Every session token now encodes
++  which society it was issued for, alongside `playerId`/`role`.
++- **Cross-tenant session detection.** `lib/auth.ts`'s `getSession()` (and
++  `middleware.ts`'s separate, Edge-safe copy of the same check) now
++  compares the session's `societyId` against the CURRENT request's
++  resolved tenant on every read — not just at login. A session issued for
++  Society A presented on a request that resolves to Society B is treated
++  exactly like "not logged in," never trusted just because the token
++  itself is otherwise valid and unexpired. Fails closed: if the current
++  society can't even be determined, the session is treated as invalid
++  rather than assumed valid.
++- **Registration is tenant-scoped.** `registerPlayer` resolves the
++  current request's society and stamps the new player with it explicitly
++  — not left to the column's DB default, which only covers the original
++  single society.
++- **Login verifies tenant match.** `loginPlayer` checks the selected
++  player actually belongs to the current tenant before allowing login —
++  same generic "Player not found" error either way, so a wrong-tenant
++  attempt doesn't leak that the id exists elsewhere.
++- **`listPlayersForLogin` is scoped now, not deferred to Phase 3.** This
++  is technically a query filter — Phase 3's job in general — but showing
++  another tenant's member list in the login dropdown is an auth bug, not
++  a general data-scoping one, so it couldn't wait for the broader effort.
++
++**A real, one-time consequence worth knowing before you deploy this
++branch anywhere with live sessions:** every token signed before this
++change lacks `societyId` and will fail verification once this ships —
++anyone currently logged in gets signed out and needs to log in again.
++One-time inconvenience, not a bug: there's no safe value to retroactively
++assume for an old token.
++
++**Still explicitly NOT done** — this phase covers authentication and
++registration specifically, not general data access:
++- No other server action checks that the data it's reading/writing
++  belongs to the caller's own society — an admin action like adjusting a
++  player's handicap doesn't yet verify the target player is in the same
++  society as the admin. That's Phase 3.
++- **Don't run this app with a second real tenant's data until Phase 3 is
++  done.** Phase 1 and 2 make tenant *resolution* and *authentication*
++  correct; they don't yet make every *query* correct. A second tenant
++  today could still see (or be seen by) the first through any
++  unscoped action.
++
+ ## Application settings (`/admin/settings`)
+ 
+ A general, extensible settings store — `app_settings` is a plain
+diff --git a/app/actions/auth.ts b/app/actions/auth.ts
+index c0fa07c..b199e8c 100644
+--- a/app/actions/auth.ts
++++ b/app/actions/auth.ts
+@@ -11,6 +11,7 @@ import {
+   clearSessionCookie,
+ } from "@/lib/auth";
+ import { checkLoginRateLimit, resetLoginRateLimit } from "@/lib/rate-limit";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ 
+ // ---------- Register ----------
+ 
+@@ -66,6 +67,7 @@ export async function registerPlayer(formData: FormData): Promise<ActionResult>
+     };
+   }
+ 
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+   const pinHash = await hashPin(data.pin);
+ 
+@@ -78,6 +80,11 @@ export async function registerPlayer(formData: FormData): Promise<ActionResult>
+       current_handicap: data.initialHandicap,
+       pin_hash: pinHash,
+       role: "player",
++      // Explicit, not left to the column's DB default — the default only
++      // covers the one original society. A real registration must always
++      // be stamped with whichever society this request actually resolved
++      // to, so it's correct the moment a second tenant exists.
++      society_id: societyId,
+     })
+     .select("id, role")
+     .single();
+@@ -86,7 +93,7 @@ export async function registerPlayer(formData: FormData): Promise<ActionResult>
+     return { ok: false, error: "Could not create your player profile. Please try again." };
+   }
+ 
+-  const token = await createSessionToken({ playerId: player.id, role: player.role });
++  const token = await createSessionToken({ playerId: player.id, role: player.role, societyId });
+   await setSessionCookie(token);
+ 
+   redirect("/dashboard");
+@@ -122,9 +129,11 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
+   }
+ 
+   const supabase = createServiceClient();
++  const societyId = await getCurrentSocietyId();
++
+   const { data: player, error } = await supabase
+     .from("players")
+-    .select("id, pin_hash, role")
++    .select("id, pin_hash, role, society_id")
+     .eq("id", playerId)
+     .single();
+ 
+@@ -132,6 +141,14 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
+     return { ok: false, error: "Player not found." };
+   }
+ 
++  // Same error message as "doesn't exist at all" rather than something
++  // more specific — a player belonging to a different society shouldn't
++  // learn that their id exists elsewhere just by trying to log in with it
++  // on the wrong tenant's subdomain.
++  if (player.society_id !== societyId) {
++    return { ok: false, error: "Player not found." };
++  }
++
+   const valid = await verifyPin(pin, player.pin_hash);
+   if (!valid) {
+     return { ok: false, error: "Incorrect PIN." };
+@@ -139,7 +156,7 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
+ 
+   resetLoginRateLimit(playerId);
+ 
+-  const token = await createSessionToken({ playerId: player.id, role: player.role });
++  const token = await createSessionToken({ playerId: player.id, role: player.role, societyId });
+   await setSessionCookie(token);
+ 
+   redirect("/dashboard");
+@@ -155,10 +172,12 @@ export async function logout() {
+ // ---------- Player list for the login page selector ----------
+ 
+ export async function listPlayersForLogin() {
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+   const { data, error } = await supabase
+     .from("players")
+     .select("id, first_name, last_name")
++    .eq("society_id", societyId)
+     .order("last_name", { ascending: true });
+ 
+   if (error) return [];
+diff --git a/lib/auth.ts b/lib/auth.ts
+index b797084..d556d55 100644
+--- a/lib/auth.ts
++++ b/lib/auth.ts
+@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
+ import { SignJWT, jwtVerify } from "jose";
+ import { cookies } from "next/headers";
+ import type { PlayerRole } from "@/lib/database.types";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ 
+ const SESSION_COOKIE_NAME = "gs_session";
+ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+@@ -11,6 +12,12 @@ const PIN_REGEX = /^\d{4}$/;
+ export interface SessionPayload {
+   playerId: string;
+   role: PlayerRole;
++  /** Which society this session was issued for. Checked against the
++   * CURRENT request's resolved tenant on every read (see getSession
++   * below) — a session issued for one society is never honored on a
++   * request that resolves to a different one, even if the token itself
++   * is otherwise valid and unexpired. */
++  societyId: string;
+ }
+ 
+ function getSessionSecret(): Uint8Array {
+@@ -49,7 +56,7 @@ export async function verifyPin(pin: string, pinHash: string): Promise<boolean>
+ // ---------- Session JWT ----------
+ 
+ export async function createSessionToken(payload: SessionPayload): Promise<string> {
+-  return new SignJWT({ playerId: payload.playerId, role: payload.role })
++  return new SignJWT({ playerId: payload.playerId, role: payload.role, societyId: payload.societyId })
+     .setProtectedHeader({ alg: "HS256" })
+     .setIssuedAt()
+     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
+@@ -59,10 +66,19 @@ export async function createSessionToken(payload: SessionPayload): Promise<strin
+ export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
+   try {
+     const { payload } = await jwtVerify(token, getSessionSecret());
+-    if (typeof payload.playerId !== "string" || typeof payload.role !== "string") {
++    if (
++      typeof payload.playerId !== "string" ||
++      typeof payload.role !== "string" ||
++      typeof payload.societyId !== "string"
++    ) {
++      // A token signed before societyId existed (pre-Phase-2) fails here
++      // too — anyone already logged in when this ships gets signed out
++      // once and needs to log back in. A one-time inconvenience, not a
++      // bug: there's no safe default societyId to retroactively assume
++      // for an old token.
+       return null;
+     }
+-    return { playerId: payload.playerId, role: payload.role as PlayerRole };
++    return { playerId: payload.playerId, role: payload.role as PlayerRole, societyId: payload.societyId };
+   } catch {
+     return null;
+   }
+@@ -86,12 +102,33 @@ export async function clearSessionCookie() {
+   store.delete(SESSION_COOKIE_NAME);
+ }
+ 
+-/** Reads and verifies the session cookie. Returns null if absent/invalid/expired. */
++/** Reads and verifies the session cookie. Returns null if absent/invalid/
++ * expired, OR if the session belongs to a different society than the one
++ * resolved for this request (see lib/tenant.ts / middleware.ts) — that
++ * case is treated exactly like "not logged in" rather than trusting a
++ * token that doesn't match the current tenant. Fails closed: if the
++ * current society can't be determined at all (getCurrentSocietyId
++ * throws), the session is treated as invalid rather than assumed valid. */
+ export async function getSession(): Promise<SessionPayload | null> {
+   const store = await cookies();
+   const token = store.get(SESSION_COOKIE_NAME)?.value;
+   if (!token) return null;
+-  return verifySessionToken(token);
++
++  const session = await verifySessionToken(token);
++  if (!session) return null;
++
++  let currentSocietyId: string;
++  try {
++    currentSocietyId = await getCurrentSocietyId();
++  } catch {
++    return null;
++  }
++
++  if (session.societyId !== currentSocietyId) {
++    return null;
++  }
++
++  return session;
+ }
+ 
+ /** Throws if there's no valid session. Use in Server Actions / Route Handlers. */
+diff --git a/middleware.ts b/middleware.ts
+index a58b977..9bdfcae 100644
+--- a/middleware.ts
++++ b/middleware.ts
+@@ -95,11 +95,24 @@ function getSessionSecret(): Uint8Array {
+   return new TextEncoder().encode(secret);
+ }
+ 
+-async function readSession(token: string | undefined) {
++async function readSession(token: string | undefined, expectedSocietyId: string) {
+   if (!token) return null;
+   try {
+     const { payload } = await jwtVerify(token, getSessionSecret());
+-    if (typeof payload.playerId !== "string" || typeof payload.role !== "string") {
++    if (
++      typeof payload.playerId !== "string" ||
++      typeof payload.role !== "string" ||
++      typeof payload.societyId !== "string"
++    ) {
++      return null;
++    }
++    // A session issued for a different society is treated exactly like
++    // no session at all — never honored just because the token itself is
++    // otherwise valid and unexpired. Same check as lib/auth.ts's
++    // getSession(), duplicated here for the same reason session
++    // verification itself is duplicated in this file (Edge runtime can't
++    // import that server-only module).
++    if (payload.societyId !== expectedSocietyId) {
+       return null;
+     }
+     return { playerId: payload.playerId as string, role: payload.role as string };
+@@ -128,7 +141,7 @@ export async function middleware(request: NextRequest) {
+ 
+   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+-  const session = await readSession(token);
++  const session = await readSession(token, societyId);
+ 
+   if (isPublic) {
+     // Already logged in? Bounce away from login/register to the dashboard.

@@ -95,11 +95,24 @@ function getSessionSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-async function readSession(token: string | undefined) {
+async function readSession(token: string | undefined, expectedSocietyId: string) {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, getSessionSecret());
-    if (typeof payload.playerId !== "string" || typeof payload.role !== "string") {
+    if (
+      typeof payload.playerId !== "string" ||
+      typeof payload.role !== "string" ||
+      typeof payload.societyId !== "string"
+    ) {
+      return null;
+    }
+    // A session issued for a different society is treated exactly like
+    // no session at all — never honored just because the token itself is
+    // otherwise valid and unexpired. Same check as lib/auth.ts's
+    // getSession(), duplicated here for the same reason session
+    // verification itself is duplicated in this file (Edge runtime can't
+    // import that server-only module).
+    if (payload.societyId !== expectedSocietyId) {
       return null;
     }
     return { playerId: payload.playerId as string, role: payload.role as string };
@@ -128,7 +141,7 @@ export async function middleware(request: NextRequest) {
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const session = await readSession(token);
+  const session = await readSession(token, societyId);
 
   if (isPublic) {
     // Already logged in? Bounce away from login/register to the dashboard.

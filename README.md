@@ -271,6 +271,53 @@ subdomain testing works with zero configuration, per the comments in
 filters by `society_id`. Every page still shows the same data regardless
 of which hostname resolved — that's the next, much larger piece of work.
 
+### Phase 2 status: auth becomes tenant-aware (in progress, `feature/multi-tenant` branch)
+
+Built on top of Phase 1:
+
+- **`SessionPayload` gains `societyId`.** Every session token now encodes
+  which society it was issued for, alongside `playerId`/`role`.
+- **Cross-tenant session detection.** `lib/auth.ts`'s `getSession()` (and
+  `middleware.ts`'s separate, Edge-safe copy of the same check) now
+  compares the session's `societyId` against the CURRENT request's
+  resolved tenant on every read — not just at login. A session issued for
+  Society A presented on a request that resolves to Society B is treated
+  exactly like "not logged in," never trusted just because the token
+  itself is otherwise valid and unexpired. Fails closed: if the current
+  society can't even be determined, the session is treated as invalid
+  rather than assumed valid.
+- **Registration is tenant-scoped.** `registerPlayer` resolves the
+  current request's society and stamps the new player with it explicitly
+  — not left to the column's DB default, which only covers the original
+  single society.
+- **Login verifies tenant match.** `loginPlayer` checks the selected
+  player actually belongs to the current tenant before allowing login —
+  same generic "Player not found" error either way, so a wrong-tenant
+  attempt doesn't leak that the id exists elsewhere.
+- **`listPlayersForLogin` is scoped now, not deferred to Phase 3.** This
+  is technically a query filter — Phase 3's job in general — but showing
+  another tenant's member list in the login dropdown is an auth bug, not
+  a general data-scoping one, so it couldn't wait for the broader effort.
+
+**A real, one-time consequence worth knowing before you deploy this
+branch anywhere with live sessions:** every token signed before this
+change lacks `societyId` and will fail verification once this ships —
+anyone currently logged in gets signed out and needs to log in again.
+One-time inconvenience, not a bug: there's no safe value to retroactively
+assume for an old token.
+
+**Still explicitly NOT done** — this phase covers authentication and
+registration specifically, not general data access:
+- No other server action checks that the data it's reading/writing
+  belongs to the caller's own society — an admin action like adjusting a
+  player's handicap doesn't yet verify the target player is in the same
+  society as the admin. That's Phase 3.
+- **Don't run this app with a second real tenant's data until Phase 3 is
+  done.** Phase 1 and 2 make tenant *resolution* and *authentication*
+  correct; they don't yet make every *query* correct. A second tenant
+  today could still see (or be seen by) the first through any
+  unscoped action.
+
 ## Application settings (`/admin/settings`)
 
 A general, extensible settings store — `app_settings` is a plain
