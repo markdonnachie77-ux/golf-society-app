@@ -4,6 +4,7 @@ import { z } from "zod";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import { getCurrentSocietyId } from "@/lib/tenant";
 import { validateHoleSet, type HoleRowInput } from "@/lib/course-validation";
 import type { ActionResult } from "@/app/actions/auth";
 
@@ -56,6 +57,7 @@ function parseCourseFormData(formData: FormData) {
 
 export async function createCourse(formData: FormData): Promise<ActionResult> {
   await requireAdmin();
+  const societyId = await getCurrentSocietyId();
 
   const { detailsParsed, holes } = parseCourseFormData(formData);
   if (!detailsParsed.success) {
@@ -82,6 +84,7 @@ export async function createCourse(formData: FormData): Promise<ActionResult> {
       hole_count: details.holeCount,
       handicap_cut_per_point: details.handicapCutPerPoint,
       handicap_increase_per_point: details.handicapIncreasePerPoint,
+      society_id: societyId,
     })
     .select("id")
     .single();
@@ -98,6 +101,7 @@ export async function createCourse(formData: FormData): Promise<ActionResult> {
       stroke_index: h.strokeIndex,
       white_yards: h.whiteYards,
       yellow_yards: h.yellowYards,
+      society_id: societyId,
     }))
   );
 
@@ -117,6 +121,7 @@ export async function createCourse(formData: FormData): Promise<ActionResult> {
 
 export async function updateCourse(courseId: string, formData: FormData): Promise<ActionResult> {
   await requireAdmin();
+  const societyId = await getCurrentSocietyId();
 
   const { detailsParsed, holes } = parseCourseFormData(formData);
   if (!detailsParsed.success) {
@@ -135,7 +140,13 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
 
   const supabase = createServiceClient();
 
-  const { error: courseError } = await supabase
+  // Scoping the UPDATE itself by society_id — not just id — means an
+  // admin can never edit a course belonging to a different tenant, even
+  // if they somehow obtained its id. If the id exists but belongs to
+  // another society, this matches zero rows rather than affecting
+  // someone else's data; .select() lets us detect that and stop before
+  // touching holes at all.
+  const { data: updatedCourse, error: courseError } = await supabase
     .from("courses")
     .update({
       name: details.name,
@@ -144,10 +155,15 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
       handicap_cut_per_point: details.handicapCutPerPoint,
       handicap_increase_per_point: details.handicapIncreasePerPoint,
     })
-    .eq("id", courseId);
+    .eq("id", courseId)
+    .eq("society_id", societyId)
+    .select("id");
 
   if (courseError) {
     return { ok: false, error: "Could not update the course. Please try again." };
+  }
+  if (!updatedCourse || updatedCourse.length === 0) {
+    return { ok: false, error: "Course not found." };
   }
 
   // Upsert (not delete+insert) — matches existing hole rows by
@@ -160,6 +176,10 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
   // Postgres with a foreign-key violation. That was a real bug, not a
   // hypothetical: editing just the cut/increase rate on a course that
   // already had a round recorded against it failed here.
+  //
+  // society_id is already confirmed correct by the update check above —
+  // courseId couldn't have matched a row above if it belonged to a
+  // different tenant, so it's safe to use directly here.
   const { error: upsertError } = await supabase.from("holes").upsert(
     holes.map((h) => ({
       course_id: courseId,
@@ -168,6 +188,7 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
       stroke_index: h.strokeIndex,
       white_yards: h.whiteYards,
       yellow_yards: h.yellowYards,
+      society_id: societyId,
     })),
     { onConflict: "course_id,hole_number" }
   );
@@ -190,6 +211,7 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
     .from("holes")
     .delete()
     .eq("course_id", courseId)
+    .eq("society_id", societyId)
     .gt("hole_number", details.holeCount);
 
   if (excessHolesError) {
@@ -205,10 +227,12 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
 
 export async function listCourses() {
   await requireAdmin();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("courses")
     .select("id, name, location, hole_count, handicap_cut_per_point, handicap_increase_per_point")
+    .eq("society_id", societyId)
     .order("name", { ascending: true });
 
   if (error) return [];
@@ -217,20 +241,28 @@ export async function listCourses() {
 
 export async function getCourseWithHoles(courseId: string) {
   await requireAdmin();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
   const { data: course, error: courseError } = await supabase
     .from("courses")
     .select("*")
     .eq("id", courseId)
+    .eq("society_id", societyId)
     .single();
 
   if (courseError || !course) return null;
 
+  // holes are already implicitly scoped correctly here — course_id was
+  // just confirmed to belong to the caller's society above — but
+  // filtering by society_id here too costs nothing and matches the
+  // "every query redundantly correct, not reliant on getting one earlier
+  // check right" approach used throughout this file.
   const { data: holes, error: holesError } = await supabase
     .from("holes")
     .select("*")
     .eq("course_id", courseId)
+    .eq("society_id", societyId)
     .order("hole_number", { ascending: true });
 
   if (holesError) return null;

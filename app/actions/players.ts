@@ -2,6 +2,7 @@
 
 import { requireSession, requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import { getCurrentSocietyId } from "@/lib/tenant";
 import type { ActionResult } from "@/app/actions/auth";
 
 export interface PlayerListRow {
@@ -14,11 +15,13 @@ export interface PlayerListRow {
 
 export async function listAllPlayers(): Promise<PlayerListRow[]> {
   await requireSession();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
   const { data, error } = await supabase
     .from("players")
     .select("id, first_name, last_name, current_handicap, role")
+    .eq("society_id", societyId)
     .order("last_name", { ascending: true });
 
   if (error || !data) return [];
@@ -42,12 +45,19 @@ export interface RecentRoundRow {
 
 export async function getPlayerProfile(playerId: string) {
   await requireSession();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
+  // Scoping this by society_id is what makes /players/[id] safe to keep
+  // open to any authenticated society member (same reasoning as
+  // getScorecardDetail in scorecards.ts) — a playerId belonging to a
+  // different tenant is treated as not found, not as "found, show their
+  // profile too."
   const { data: player, error: playerError } = await supabase
     .from("players")
     .select("id, first_name, last_name, current_handicap, role, created_at")
     .eq("id", playerId)
+    .eq("society_id", societyId)
     .single();
 
   if (playerError || !player) return null;
@@ -56,6 +66,7 @@ export async function getPlayerProfile(playerId: string) {
     .from("handicap_history")
     .select("handicap_value, adjustment_amount, effective_date, notes")
     .eq("player_id", playerId)
+    .eq("society_id", societyId)
     .order("effective_date", { ascending: true });
 
   const history: HandicapHistoryPoint[] = (historyRows ?? []).map((h) => ({
@@ -69,6 +80,7 @@ export async function getPlayerProfile(playerId: string) {
     .from("scorecards")
     .select("id, played_at, status, total_stableford_points, courses(name)")
     .eq("player_id", playerId)
+    .eq("society_id", societyId)
     .order("played_at", { ascending: false })
     .limit(10);
 
@@ -101,6 +113,7 @@ export async function adjustPlayerHandicap(
   notes: string
 ): Promise<ActionResult> {
   const session = await requireAdmin();
+  const societyId = await getCurrentSocietyId();
 
   if (Number.isNaN(newHandicap)) {
     return { ok: false, error: "Enter a valid handicap." };
@@ -110,6 +123,21 @@ export async function adjustPlayerHandicap(
   }
 
   const supabase = createServiceClient();
+
+  // manual_handicap_adjustment operates purely by player id, with no
+  // tenant awareness of its own — so the ownership check happens here,
+  // before calling it. Without this, an admin could adjust the handicap
+  // of ANY player in ANY society just by knowing/guessing their id.
+  const { data: target } = await supabase
+    .from("players")
+    .select("id")
+    .eq("id", playerId)
+    .eq("society_id", societyId)
+    .maybeSingle();
+
+  if (!target) {
+    return { ok: false, error: "Player not found." };
+  }
 
   // Cast bypasses TypeScript's .rpc() argument-shape check — see the
   // identical comment in app/actions/approvals.ts's approveScorecard for
@@ -130,7 +158,22 @@ export async function adjustPlayerHandicap(
 
 export async function wipePlayerHistory(playerId: string): Promise<ActionResult> {
   await requireAdmin();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
+
+  // Same reasoning as adjustPlayerHandicap above — wipe_player_history
+  // has no tenant awareness of its own, so the ownership check happens
+  // here, before calling it.
+  const { data: target } = await supabase
+    .from("players")
+    .select("id")
+    .eq("id", playerId)
+    .eq("society_id", societyId)
+    .maybeSingle();
+
+  if (!target) {
+    return { ok: false, error: "Player not found." };
+  }
 
   // Cast bypasses TypeScript's .rpc() argument-shape check — see the
   // identical comment in app/actions/approvals.ts's approveScorecard for

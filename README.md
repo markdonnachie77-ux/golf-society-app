@@ -318,6 +318,64 @@ registration specifically, not general data access:
   today could still see (or be seen by) the first through any
   unscoped action.
 
+### Phase 3 status: every query scoped by tenant (in progress, `feature/multi-tenant` branch)
+
+This is the big one — every server action that touches `courses`,
+`holes`, `scorecards`, `scores`, `handicap_history`, `players`, or
+`app_settings` now filters by `society_id`, resolved via
+`getCurrentSocietyId()`. Files touched: `app/actions/courses.ts`,
+`app/actions/scorecards.ts`, `app/actions/approvals.ts`,
+`app/actions/players.ts`, `app/actions/settings.ts`, plus two direct
+Supabase queries in `app/dashboard/page.tsx` and `app/rounds/new/page.tsx`
+that bypassed the action-file pattern.
+
+**The most important thing this phase found, not just fixed:** every
+admin action built on a Postgres RPC function (`approveScorecard`,
+`rejectScorecard`, `adjustPlayerHandicap`, `wipePlayerHistory`,
+`deleteRound`) operates purely by id, with **no tenant awareness inside
+the SQL function itself**. Before this phase, an admin who somehow
+obtained another society's scorecard or player id — a leaked URL, a
+guessed UUID — could approve, reject, adjust, wipe, or delete data
+belonging to a completely different tenant, because the RPC would just
+act on whatever id it was given. Every one of these five call sites now
+does an explicit `.eq("id", ...).eq("society_id", ...)` ownership check
+immediately before calling the RPC, returning "not found" if it doesn't
+match — same generic error either way, so a wrong-tenant attempt doesn't
+confirm the id exists elsewhere. This is a real vulnerability class this
+phase closed, not a theoretical one flagged for later.
+
+**`app_settings`' composite key needed its own fix.** Back in the
+future-proofing migration, its primary key changed from `key` alone to
+`(society_id, key)` — but `updateSetting`'s `.upsert()` was still using
+`onConflict: "key"`, which no longer matches any real constraint on the
+table. Easy to miss, since it would only surface once a second tenant
+tried to change a setting and the upsert resolved against the wrong
+target. Fixed to `onConflict: "society_id,key"`, with `society_id`
+included in the upserted row.
+
+**Every list/collection query is scoped** — `listCourses`,
+`listCoursesForRound`, `listAllPlayers`, `listPendingScorecards`,
+`listSocietyRounds` — these are the ones where a missed filter would be
+immediately, visibly wrong (one tenant's course list showing another's
+courses). Every single-row lookup by id is scoped too, even where the id
+itself is already effectively tenant-safe (e.g. fetching the current
+session's own player row) — redundant in some cases, but consistent, so
+nothing is "correct by accident" and every query stands on its own.
+
+**What's still worth doing, not done in this pass:**
+- The Postgres RPC functions themselves could be hardened to accept and
+  verify `p_society_id` internally, as a second layer beneath the
+  application-level check — real defense in depth, given how much these
+  specific functions can mutate (a handicap value, an entire player's
+  history). Not done here because the application-level check already
+  closes the actual vulnerability; the DB-level version is a valuable
+  follow-up, not an open gap.
+- Nothing has been tested yet against a second real tenant with real
+  data in the same database. Before merging this branch, seed a second
+  test society (a different slug) locally and manually verify each page
+  — courses, rounds, approvals, players — genuinely shows only its own
+  tenant's data when visited via that tenant's `*.localhost` subdomain.
+
 ## Application settings (`/admin/settings`)
 
 A general, extensible settings store — `app_settings` is a plain

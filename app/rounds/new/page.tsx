@@ -1,5 +1,6 @@
 import { requireSession } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import { getCurrentSocietyId } from "@/lib/tenant";
 import { listCoursesForRound } from "@/app/actions/scorecards";
 import { listAllPlayers } from "@/app/actions/players";
 import { getAppSettings } from "@/app/actions/settings";
@@ -9,12 +10,18 @@ import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function NewRoundPage() {
   const session = await requireSession();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
   const isAdmin = session.role === "admin";
 
   const [courses, { data: player }, allPlayers, settings] = await Promise.all([
     listCoursesForRound(),
-    supabase.from("players").select("current_handicap").eq("id", session.playerId).single(),
+    supabase
+      .from("players")
+      .select("current_handicap")
+      .eq("id", session.playerId)
+      .eq("society_id", societyId)
+      .single(),
     // Only admins get the "log on behalf of" picker, so don't bother
     // fetching the whole player directory for everyone else.
     isAdmin ? listAllPlayers() : Promise.resolve([]),

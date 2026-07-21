@@ -1,0 +1,749 @@
+diff --git a/README.md b/README.md
+index b414f32..c548041 100644
+--- a/README.md
++++ b/README.md
+@@ -318,6 +318,64 @@ registration specifically, not general data access:
+   today could still see (or be seen by) the first through any
+   unscoped action.
+ 
++### Phase 3 status: every query scoped by tenant (in progress, `feature/multi-tenant` branch)
++
++This is the big one — every server action that touches `courses`,
++`holes`, `scorecards`, `scores`, `handicap_history`, `players`, or
++`app_settings` now filters by `society_id`, resolved via
++`getCurrentSocietyId()`. Files touched: `app/actions/courses.ts`,
++`app/actions/scorecards.ts`, `app/actions/approvals.ts`,
++`app/actions/players.ts`, `app/actions/settings.ts`, plus two direct
++Supabase queries in `app/dashboard/page.tsx` and `app/rounds/new/page.tsx`
++that bypassed the action-file pattern.
++
++**The most important thing this phase found, not just fixed:** every
++admin action built on a Postgres RPC function (`approveScorecard`,
++`rejectScorecard`, `adjustPlayerHandicap`, `wipePlayerHistory`,
++`deleteRound`) operates purely by id, with **no tenant awareness inside
++the SQL function itself**. Before this phase, an admin who somehow
++obtained another society's scorecard or player id — a leaked URL, a
++guessed UUID — could approve, reject, adjust, wipe, or delete data
++belonging to a completely different tenant, because the RPC would just
++act on whatever id it was given. Every one of these five call sites now
++does an explicit `.eq("id", ...).eq("society_id", ...)` ownership check
++immediately before calling the RPC, returning "not found" if it doesn't
++match — same generic error either way, so a wrong-tenant attempt doesn't
++confirm the id exists elsewhere. This is a real vulnerability class this
++phase closed, not a theoretical one flagged for later.
++
++**`app_settings`' composite key needed its own fix.** Back in the
++future-proofing migration, its primary key changed from `key` alone to
++`(society_id, key)` — but `updateSetting`'s `.upsert()` was still using
++`onConflict: "key"`, which no longer matches any real constraint on the
++table. Easy to miss, since it would only surface once a second tenant
++tried to change a setting and the upsert resolved against the wrong
++target. Fixed to `onConflict: "society_id,key"`, with `society_id`
++included in the upserted row.
++
++**Every list/collection query is scoped** — `listCourses`,
++`listCoursesForRound`, `listAllPlayers`, `listPendingScorecards`,
++`listSocietyRounds` — these are the ones where a missed filter would be
++immediately, visibly wrong (one tenant's course list showing another's
++courses). Every single-row lookup by id is scoped too, even where the id
++itself is already effectively tenant-safe (e.g. fetching the current
++session's own player row) — redundant in some cases, but consistent, so
++nothing is "correct by accident" and every query stands on its own.
++
++**What's still worth doing, not done in this pass:**
++- The Postgres RPC functions themselves could be hardened to accept and
++  verify `p_society_id` internally, as a second layer beneath the
++  application-level check — real defense in depth, given how much these
++  specific functions can mutate (a handicap value, an entire player's
++  history). Not done here because the application-level check already
++  closes the actual vulnerability; the DB-level version is a valuable
++  follow-up, not an open gap.
++- Nothing has been tested yet against a second real tenant with real
++  data in the same database. Before merging this branch, seed a second
++  test society (a different slug) locally and manually verify each page
++  — courses, rounds, approvals, players — genuinely shows only its own
++  tenant's data when visited via that tenant's `*.localhost` subdomain.
++
+ ## Application settings (`/admin/settings`)
+ 
+ A general, extensible settings store — `app_settings` is a plain
+diff --git a/app/actions/approvals.ts b/app/actions/approvals.ts
+index 07bd19e..e7acab6 100644
+--- a/app/actions/approvals.ts
++++ b/app/actions/approvals.ts
+@@ -3,6 +3,7 @@
+ import { revalidatePath } from "next/cache";
+ import { requireAdmin } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ import type { ActionResult } from "@/app/actions/auth";
+ 
+ export interface PendingScorecardRow {
+@@ -21,6 +22,7 @@ export interface PendingScorecardRow {
+ 
+ export async function listPendingScorecards(): Promise<PendingScorecardRow[]> {
+   await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
+   const { data, error } = await supabase
+@@ -29,6 +31,7 @@ export async function listPendingScorecards(): Promise<PendingScorecardRow[]> {
+       "id, played_at, tee_color, round_type, total_gross_stroke_play, total_net_stroke_play, total_stableford_points, proposed_handicap_change, created_at, players!scorecards_player_id_fkey(first_name, last_name), courses(name)"
+     )
+     .eq("status", "pending_approval")
++    .eq("society_id", societyId)
+     .order("created_at", { ascending: true });
+ 
+   if (error) {
+@@ -89,8 +92,25 @@ export async function approveScorecard(
+   appliedChange: number
+ ): Promise<ActionResult> {
+   const session = await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
++  // approve_scorecard operates purely by scorecard id, with no tenant
++  // awareness of its own — so the ownership check has to happen here,
++  // before calling it. Without this, an admin could approve (and apply a
++  // real handicap change to) ANY scorecard in ANY society just by
++  // knowing/guessing its id.
++  const { data: target } = await supabase
++    .from("scorecards")
++    .select("id")
++    .eq("id", scorecardId)
++    .eq("society_id", societyId)
++    .maybeSingle();
++
++  if (!target) {
++    return { ok: false, error: "Round not found." };
++  }
++
+   // Cast bypasses TypeScript's .rpc() argument-shape check specifically —
+   // the hand-written `Functions` type in lib/database.types.ts (no
+   // generated Relationships/overload metadata, since it wasn't produced
+@@ -119,8 +139,22 @@ export async function approveScorecard(
+ 
+ export async function rejectScorecard(scorecardId: string): Promise<ActionResult> {
+   const session = await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
++  // Same reasoning as approveScorecard above — reject_scorecard has no
++  // tenant awareness of its own, so the ownership check happens here.
++  const { data: target } = await supabase
++    .from("scorecards")
++    .select("id")
++    .eq("id", scorecardId)
++    .eq("society_id", societyId)
++    .maybeSingle();
++
++  if (!target) {
++    return { ok: false, error: "Round not found." };
++  }
++
+   const { error } = await (supabase.rpc as any)("reject_scorecard", {
+     p_scorecard_id: scorecardId,
+     p_reviewer_id: session.playerId,
+diff --git a/app/actions/courses.ts b/app/actions/courses.ts
+index 891993a..7af5781 100644
+--- a/app/actions/courses.ts
++++ b/app/actions/courses.ts
+@@ -4,6 +4,7 @@ import { z } from "zod";
+ import { redirect } from "next/navigation";
+ import { requireAdmin } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ import { validateHoleSet, type HoleRowInput } from "@/lib/course-validation";
+ import type { ActionResult } from "@/app/actions/auth";
+ 
+@@ -56,6 +57,7 @@ function parseCourseFormData(formData: FormData) {
+ 
+ export async function createCourse(formData: FormData): Promise<ActionResult> {
+   await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+ 
+   const { detailsParsed, holes } = parseCourseFormData(formData);
+   if (!detailsParsed.success) {
+@@ -82,6 +84,7 @@ export async function createCourse(formData: FormData): Promise<ActionResult> {
+       hole_count: details.holeCount,
+       handicap_cut_per_point: details.handicapCutPerPoint,
+       handicap_increase_per_point: details.handicapIncreasePerPoint,
++      society_id: societyId,
+     })
+     .select("id")
+     .single();
+@@ -98,6 +101,7 @@ export async function createCourse(formData: FormData): Promise<ActionResult> {
+       stroke_index: h.strokeIndex,
+       white_yards: h.whiteYards,
+       yellow_yards: h.yellowYards,
++      society_id: societyId,
+     }))
+   );
+ 
+@@ -117,6 +121,7 @@ export async function createCourse(formData: FormData): Promise<ActionResult> {
+ 
+ export async function updateCourse(courseId: string, formData: FormData): Promise<ActionResult> {
+   await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+ 
+   const { detailsParsed, holes } = parseCourseFormData(formData);
+   if (!detailsParsed.success) {
+@@ -135,7 +140,13 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
+ 
+   const supabase = createServiceClient();
+ 
+-  const { error: courseError } = await supabase
++  // Scoping the UPDATE itself by society_id — not just id — means an
++  // admin can never edit a course belonging to a different tenant, even
++  // if they somehow obtained its id. If the id exists but belongs to
++  // another society, this matches zero rows rather than affecting
++  // someone else's data; .select() lets us detect that and stop before
++  // touching holes at all.
++  const { data: updatedCourse, error: courseError } = await supabase
+     .from("courses")
+     .update({
+       name: details.name,
+@@ -144,11 +155,16 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
+       handicap_cut_per_point: details.handicapCutPerPoint,
+       handicap_increase_per_point: details.handicapIncreasePerPoint,
+     })
+-    .eq("id", courseId);
++    .eq("id", courseId)
++    .eq("society_id", societyId)
++    .select("id");
+ 
+   if (courseError) {
+     return { ok: false, error: "Could not update the course. Please try again." };
+   }
++  if (!updatedCourse || updatedCourse.length === 0) {
++    return { ok: false, error: "Course not found." };
++  }
+ 
+   // Upsert (not delete+insert) — matches existing hole rows by
+   // (course_id, hole_number), the unique constraint from
+@@ -160,6 +176,10 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
+   // Postgres with a foreign-key violation. That was a real bug, not a
+   // hypothetical: editing just the cut/increase rate on a course that
+   // already had a round recorded against it failed here.
++  //
++  // society_id is already confirmed correct by the update check above —
++  // courseId couldn't have matched a row above if it belonged to a
++  // different tenant, so it's safe to use directly here.
+   const { error: upsertError } = await supabase.from("holes").upsert(
+     holes.map((h) => ({
+       course_id: courseId,
+@@ -168,6 +188,7 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
+       stroke_index: h.strokeIndex,
+       white_yards: h.whiteYards,
+       yellow_yards: h.yellowYards,
++      society_id: societyId,
+     })),
+     { onConflict: "course_id,hole_number" }
+   );
+@@ -190,6 +211,7 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
+     .from("holes")
+     .delete()
+     .eq("course_id", courseId)
++    .eq("society_id", societyId)
+     .gt("hole_number", details.holeCount);
+ 
+   if (excessHolesError) {
+@@ -205,10 +227,12 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
+ 
+ export async function listCourses() {
+   await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+   const { data, error } = await supabase
+     .from("courses")
+     .select("id, name, location, hole_count, handicap_cut_per_point, handicap_increase_per_point")
++    .eq("society_id", societyId)
+     .order("name", { ascending: true });
+ 
+   if (error) return [];
+@@ -217,20 +241,28 @@ export async function listCourses() {
+ 
+ export async function getCourseWithHoles(courseId: string) {
+   await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
+   const { data: course, error: courseError } = await supabase
+     .from("courses")
+     .select("*")
+     .eq("id", courseId)
++    .eq("society_id", societyId)
+     .single();
+ 
+   if (courseError || !course) return null;
+ 
++  // holes are already implicitly scoped correctly here — course_id was
++  // just confirmed to belong to the caller's society above — but
++  // filtering by society_id here too costs nothing and matches the
++  // "every query redundantly correct, not reliant on getting one earlier
++  // check right" approach used throughout this file.
+   const { data: holes, error: holesError } = await supabase
+     .from("holes")
+     .select("*")
+     .eq("course_id", courseId)
++    .eq("society_id", societyId)
+     .order("hole_number", { ascending: true });
+ 
+   if (holesError) return null;
+diff --git a/app/actions/players.ts b/app/actions/players.ts
+index 0b12285..ae12166 100644
+--- a/app/actions/players.ts
++++ b/app/actions/players.ts
+@@ -2,6 +2,7 @@
+ 
+ import { requireSession, requireAdmin } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ import type { ActionResult } from "@/app/actions/auth";
+ 
+ export interface PlayerListRow {
+@@ -14,11 +15,13 @@ export interface PlayerListRow {
+ 
+ export async function listAllPlayers(): Promise<PlayerListRow[]> {
+   await requireSession();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
+   const { data, error } = await supabase
+     .from("players")
+     .select("id, first_name, last_name, current_handicap, role")
++    .eq("society_id", societyId)
+     .order("last_name", { ascending: true });
+ 
+   if (error || !data) return [];
+@@ -42,12 +45,19 @@ export interface RecentRoundRow {
+ 
+ export async function getPlayerProfile(playerId: string) {
+   await requireSession();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
++  // Scoping this by society_id is what makes /players/[id] safe to keep
++  // open to any authenticated society member (same reasoning as
++  // getScorecardDetail in scorecards.ts) — a playerId belonging to a
++  // different tenant is treated as not found, not as "found, show their
++  // profile too."
+   const { data: player, error: playerError } = await supabase
+     .from("players")
+     .select("id, first_name, last_name, current_handicap, role, created_at")
+     .eq("id", playerId)
++    .eq("society_id", societyId)
+     .single();
+ 
+   if (playerError || !player) return null;
+@@ -56,6 +66,7 @@ export async function getPlayerProfile(playerId: string) {
+     .from("handicap_history")
+     .select("handicap_value, adjustment_amount, effective_date, notes")
+     .eq("player_id", playerId)
++    .eq("society_id", societyId)
+     .order("effective_date", { ascending: true });
+ 
+   const history: HandicapHistoryPoint[] = (historyRows ?? []).map((h) => ({
+@@ -69,6 +80,7 @@ export async function getPlayerProfile(playerId: string) {
+     .from("scorecards")
+     .select("id, played_at, status, total_stableford_points, courses(name)")
+     .eq("player_id", playerId)
++    .eq("society_id", societyId)
+     .order("played_at", { ascending: false })
+     .limit(10);
+ 
+@@ -101,6 +113,7 @@ export async function adjustPlayerHandicap(
+   notes: string
+ ): Promise<ActionResult> {
+   const session = await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+ 
+   if (Number.isNaN(newHandicap)) {
+     return { ok: false, error: "Enter a valid handicap." };
+@@ -111,6 +124,21 @@ export async function adjustPlayerHandicap(
+ 
+   const supabase = createServiceClient();
+ 
++  // manual_handicap_adjustment operates purely by player id, with no
++  // tenant awareness of its own — so the ownership check happens here,
++  // before calling it. Without this, an admin could adjust the handicap
++  // of ANY player in ANY society just by knowing/guessing their id.
++  const { data: target } = await supabase
++    .from("players")
++    .select("id")
++    .eq("id", playerId)
++    .eq("society_id", societyId)
++    .maybeSingle();
++
++  if (!target) {
++    return { ok: false, error: "Player not found." };
++  }
++
+   // Cast bypasses TypeScript's .rpc() argument-shape check — see the
+   // identical comment in app/actions/approvals.ts's approveScorecard for
+   // why. No effect at runtime.
+@@ -130,8 +158,23 @@ export async function adjustPlayerHandicap(
+ 
+ export async function wipePlayerHistory(playerId: string): Promise<ActionResult> {
+   await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
++  // Same reasoning as adjustPlayerHandicap above — wipe_player_history
++  // has no tenant awareness of its own, so the ownership check happens
++  // here, before calling it.
++  const { data: target } = await supabase
++    .from("players")
++    .select("id")
++    .eq("id", playerId)
++    .eq("society_id", societyId)
++    .maybeSingle();
++
++  if (!target) {
++    return { ok: false, error: "Player not found." };
++  }
++
+   // Cast bypasses TypeScript's .rpc() argument-shape check — see the
+   // identical comment in app/actions/approvals.ts's approveScorecard for
+   // why. No effect at runtime.
+diff --git a/app/actions/scorecards.ts b/app/actions/scorecards.ts
+index 4eb7b57..90dbc6d 100644
+--- a/app/actions/scorecards.ts
++++ b/app/actions/scorecards.ts
+@@ -4,6 +4,7 @@ import { z } from "zod";
+ import { redirect } from "next/navigation";
+ import { requireSession, requireAdmin } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
+ import { filterHolesForRoundType } from "@/lib/round-setup";
+ import type { ActionResult } from "@/app/actions/auth";
+@@ -13,10 +14,12 @@ import { getAppSettings } from "@/app/actions/settings";
+ 
+ export async function listCoursesForRound() {
+   await requireSession();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+   const { data, error } = await supabase
+     .from("courses")
+     .select("id, name, location, hole_count, handicap_cut_per_point, handicap_increase_per_point")
++    .eq("society_id", societyId)
+     .order("name", { ascending: true });
+ 
+   if (error) return [];
+@@ -25,12 +28,17 @@ export async function listCoursesForRound() {
+ 
+ export async function getHolesForRound(courseId: string, roundType: RoundType) {
+   await requireSession();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
++  // Scoping by society_id here (not just course_id) matters: without it,
++  // a courseId belonging to a different tenant would still return that
++  // tenant's hole layout — leaking their course setup into this one.
+   const { data: holes, error } = await supabase
+     .from("holes")
+     .select("id, hole_number, par, stroke_index")
+     .eq("course_id", courseId)
++    .eq("society_id", societyId)
+     .order("hole_number", { ascending: true });
+ 
+   if (error || !holes) return [];
+@@ -60,6 +68,8 @@ const submitSchema = z.object({
+ 
+ export async function createScorecard(formData: FormData): Promise<ActionResult> {
+   const session = await requireSession();
++  const societyId = await getCurrentSocietyId();
++  const supabase = createServiceClient();
+ 
+   if (session.role !== "admin") {
+     const settings = await getAppSettings();
+@@ -86,6 +96,19 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+     if (!z.string().uuid().safeParse(onBehalfRaw).success) {
+       return { ok: false, error: "Invalid player selected." };
+     }
++    // Confirm the target player actually belongs to THIS admin's own
++    // society — without this check, an admin could log a round for a
++    // player id belonging to a completely different tenant, if they
++    // somehow obtained it (a leaked URL, a guessed id, etc.).
++    const { data: targetPlayer } = await supabase
++      .from("players")
++      .select("id")
++      .eq("id", onBehalfRaw)
++      .eq("society_id", societyId)
++      .maybeSingle();
++    if (!targetPlayer) {
++      return { ok: false, error: "Invalid player selected." };
++    }
+     targetPlayerId = onBehalfRaw;
+   }
+ 
+@@ -118,14 +141,16 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+ 
+   const { courseId, teeColor, roundType, playedAt, playingHandicap } = parsed.data;
+ 
+-  const supabase = createServiceClient();
+-
+   // Re-fetch the course + holes server-side — never trust totals computed
+-  // on the client. This is the authoritative calculation that gets stored.
++  // on the client. This is the authoritative calculation that gets
++  // stored. Scoping by society_id here means a courseId belonging to a
++  // different tenant is treated as not found, not as "found, and let's
++  // use their rates/hole layout."
+   const { data: course, error: courseError } = await supabase
+     .from("courses")
+     .select("id, hole_count, handicap_cut_per_point, handicap_increase_per_point")
+     .eq("id", courseId)
++    .eq("society_id", societyId)
+     .single();
+ 
+   if (courseError || !course) {
+@@ -135,7 +160,8 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+   const { data: allHoles, error: holesError } = await supabase
+     .from("holes")
+     .select("id, hole_number, par, stroke_index")
+-    .eq("course_id", courseId);
++    .eq("course_id", courseId)
++    .eq("society_id", societyId);
+ 
+   if (holesError || !allHoles) {
+     return { ok: false, error: "Could not load this course's holes." };
+@@ -190,6 +216,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+       total_stableford_points: summary.totalStablefordPoints,
+       proposed_handicap_change: change,
+       status: "pending_approval",
++      society_id: societyId,
+     })
+     .select("id")
+     .single();
+@@ -206,6 +233,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+       net_strokes: h.netStrokes,
+       stableford_points: h.stablefordPoints,
+       picked_up: h.pickedUp,
++      society_id: societyId,
+     }))
+   );
+ 
+@@ -221,14 +249,21 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+ 
+ export async function getScorecardDetail(scorecardId: string) {
+   await requireSession(); // just needs to be logged in — see note below
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
++  // Scoping this by society_id is the critical line in this function: an
++  // authenticated player from ANY society can view ANY scorecard's detail
++  // (see the Phase 7 note below) — but only within their OWN society.
++  // Without this filter, that Phase 7 openness would leak across tenants
++  // entirely, not just within one society.
+   const { data: scorecard, error } = await supabase
+     .from("scorecards")
+     .select(
+       "id, player_id, course_id, tee_color, round_type, playing_handicap, played_at, total_gross_stroke_play, total_net_stroke_play, total_stableford_points, proposed_handicap_change, status, reviewed_at"
+     )
+     .eq("id", scorecardId)
++    .eq("society_id", societyId)
+     .single();
+ 
+   if (error || !scorecard) return null;
+@@ -238,18 +273,21 @@ export async function getScorecardDetail(scorecardId: string) {
+   // to the owner would mean every non-owner click 404s — so this is now
+   // open to any authenticated society member, matching how the rest of
+   // the app already treats handicaps and results as shared/visible within
+-  // the society rather than private to each player.
++  // the society rather than private to each player. "Within the society"
++  // is the operative phrase — see the society_id filter above.
+ 
+   const { data: course } = await supabase
+     .from("courses")
+     .select("id, name, location, hole_count")
+     .eq("id", scorecard.course_id)
++    .eq("society_id", societyId)
+     .single();
+ 
+   const { data: scores } = await supabase
+     .from("scores")
+     .select("id, hole_id, gross_strokes, net_strokes, stableford_points, picked_up, holes(hole_number, par, stroke_index)")
+-    .eq("scorecard_id", scorecardId);
++    .eq("scorecard_id", scorecardId)
++    .eq("society_id", societyId);
+ 
+   // See the comment in app/actions/approvals.ts's listPendingScorecards for
+   // why this cast (of the whole array, before any property access) is
+@@ -282,6 +320,7 @@ export async function getScorecardDetail(scorecardId: string) {
+       .from("handicap_history")
+       .select("adjustment_amount")
+       .eq("scorecard_id", scorecardId)
++      .eq("society_id", societyId)
+       .maybeSingle();
+     appliedChange = historyRow?.adjustment_amount ?? null;
+   }
+@@ -309,6 +348,7 @@ const SOCIETY_FEED_LIMIT = 50;
+  * society's round volume ever makes 50 feel too short. */
+ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
+   await requireSession();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
+   const { data, error } = await supabase
+@@ -316,6 +356,7 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
+     .select(
+       "id, played_at, status, total_stableford_points, proposed_handicap_change, players!scorecards_player_id_fkey(first_name, last_name), courses(name)"
+     )
++    .eq("society_id", societyId)
+     .order("played_at", { ascending: false })
+     .order("created_at", { ascending: false })
+     .limit(SOCIETY_FEED_LIMIT);
+@@ -356,8 +397,25 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
+ 
+ export async function deleteRound(scorecardId: string): Promise<ActionResult> {
+   await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
++  // The delete_round RPC operates purely by scorecard id, with no
++  // tenant awareness of its own — so the ownership check has to happen
++  // here, before calling it. Without this, an admin could delete ANY
++  // scorecard in ANY society just by knowing/guessing its id, since the
++  // RPC itself would happily act on it.
++  const { data: target } = await supabase
++    .from("scorecards")
++    .select("id")
++    .eq("id", scorecardId)
++    .eq("society_id", societyId)
++    .maybeSingle();
++
++  if (!target) {
++    return { ok: false, error: "Round not found." };
++  }
++
+   // Cast bypasses TypeScript's .rpc() argument-shape check — see the
+   // identical comment in app/actions/approvals.ts's approveScorecard for
+   // why. No effect at runtime.
+diff --git a/app/actions/settings.ts b/app/actions/settings.ts
+index f933069..e274c43 100644
+--- a/app/actions/settings.ts
++++ b/app/actions/settings.ts
+@@ -2,13 +2,15 @@
+ 
+ import { requireSession, requireAdmin } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ import type { ActionResult } from "@/app/actions/auth";
+ 
+ /**
+  * Known setting keys. Adding a new setting means: add its key here, add a
+  * field + default to AppSettings/DEFAULTS below, and add a row for it in
+  * getAppSettings' mapping. No migration needed — app_settings is a plain
+- * key/value table (see 0014_app_settings.sql) — just insert/update a row.
++ * key/value table (see 0014_app_settings.sql, re-keyed per-society in
++ * 0015_future_proof_multi_tenancy.sql) — just insert/update a row.
+  */
+ export type SettingKey = "players_can_log_own_rounds";
+ 
+@@ -30,9 +32,18 @@ const DEFAULTS: AppSettings = {
+  * exactly like today — nothing silently breaks for an existing install. */
+ export async function getAppSettings(): Promise<AppSettings> {
+   await requireSession();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
+-  const { data, error } = await supabase.from("app_settings").select("key, value");
++  // app_settings' primary key is (society_id, key) as of
++  // 0015_future_proof_multi_tenancy.sql — without this filter, every
++  // society's settings rows would come back mixed together, and the
++  // byKey map below would end up keyed only by `key`, silently picking
++  // up whichever society's row happened to arrive for it.
++  const { data, error } = await supabase
++    .from("app_settings")
++    .select("key, value")
++    .eq("society_id", societyId);
+ 
+   if (error || !data) return { ...DEFAULTS };
+ 
+@@ -47,16 +58,25 @@ export async function getAppSettings(): Promise<AppSettings> {
+ 
+ export async function updateSetting(key: SettingKey, value: boolean): Promise<ActionResult> {
+   const session = await requireAdmin();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
++  // onConflict must match the table's actual unique constraint —
++  // (society_id, key), not `key` alone, since 0015 re-keyed this table
++  // specifically so each society can set this independently. Using the
++  // old "key" onConflict target here would either error (no matching
++  // constraint) or, worse, silently upsert against the wrong constraint
++  // if one still existed — this was a real, easy-to-miss consequence of
++  // the earlier schema change that needed catching here.
+   const { error } = await supabase.from("app_settings").upsert(
+     {
+       key,
+       value,
++      society_id: societyId,
+       updated_by: session.playerId,
+       updated_at: new Date().toISOString(),
+     },
+-    { onConflict: "key" }
++    { onConflict: "society_id,key" }
+   );
+ 
+   if (error) {
+diff --git a/app/dashboard/page.tsx b/app/dashboard/page.tsx
+index 80a7dfc..b107a3d 100644
+--- a/app/dashboard/page.tsx
++++ b/app/dashboard/page.tsx
+@@ -1,6 +1,7 @@
+ import Link from "next/link";
+ import { requireSession } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ import { logout } from "@/app/actions/auth";
+ import { getAppSettings } from "@/app/actions/settings";
+ import { Button } from "@/components/ui/button";
+@@ -9,6 +10,7 @@ import { BrandEyebrow } from "@/components/brand-eyebrow";
+ 
+ export default async function DashboardPage() {
+   const session = await requireSession();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+ 
+   const [{ data: player }, settings] = await Promise.all([
+@@ -16,6 +18,7 @@ export default async function DashboardPage() {
+       .from("players")
+       .select("first_name, last_name, current_handicap, role")
+       .eq("id", session.playerId)
++      .eq("society_id", societyId)
+       .single(),
+     getAppSettings(),
+   ]);
+diff --git a/app/rounds/new/page.tsx b/app/rounds/new/page.tsx
+index d8cd3d4..7c86463 100644
+--- a/app/rounds/new/page.tsx
++++ b/app/rounds/new/page.tsx
+@@ -1,5 +1,6 @@
+ import { requireSession } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
++import { getCurrentSocietyId } from "@/lib/tenant";
+ import { listCoursesForRound } from "@/app/actions/scorecards";
+ import { listAllPlayers } from "@/app/actions/players";
+ import { getAppSettings } from "@/app/actions/settings";
+@@ -9,12 +10,18 @@ import { BrandEyebrow } from "@/components/brand-eyebrow";
+ 
+ export default async function NewRoundPage() {
+   const session = await requireSession();
++  const societyId = await getCurrentSocietyId();
+   const supabase = createServiceClient();
+   const isAdmin = session.role === "admin";
+ 
+   const [courses, { data: player }, allPlayers, settings] = await Promise.all([
+     listCoursesForRound(),
+-    supabase.from("players").select("current_handicap").eq("id", session.playerId).single(),
++    supabase
++      .from("players")
++      .select("current_handicap")
++      .eq("id", session.playerId)
++      .eq("society_id", societyId)
++      .single(),
+     // Only admins get the "log on behalf of" picker, so don't bother
+     // fetching the whole player directory for everyone else.
+     isAdmin ? listAllPlayers() : Promise.resolve([]),

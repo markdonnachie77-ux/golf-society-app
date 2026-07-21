@@ -4,6 +4,7 @@ import { z } from "zod";
 import { redirect } from "next/navigation";
 import { requireSession, requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import { getCurrentSocietyId } from "@/lib/tenant";
 import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
 import { filterHolesForRoundType } from "@/lib/round-setup";
 import type { ActionResult } from "@/app/actions/auth";
@@ -13,10 +14,12 @@ import { getAppSettings } from "@/app/actions/settings";
 
 export async function listCoursesForRound() {
   await requireSession();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("courses")
     .select("id, name, location, hole_count, handicap_cut_per_point, handicap_increase_per_point")
+    .eq("society_id", societyId)
     .order("name", { ascending: true });
 
   if (error) return [];
@@ -25,12 +28,17 @@ export async function listCoursesForRound() {
 
 export async function getHolesForRound(courseId: string, roundType: RoundType) {
   await requireSession();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
+  // Scoping by society_id here (not just course_id) matters: without it,
+  // a courseId belonging to a different tenant would still return that
+  // tenant's hole layout — leaking their course setup into this one.
   const { data: holes, error } = await supabase
     .from("holes")
     .select("id, hole_number, par, stroke_index")
     .eq("course_id", courseId)
+    .eq("society_id", societyId)
     .order("hole_number", { ascending: true });
 
   if (error || !holes) return [];
@@ -60,6 +68,8 @@ const submitSchema = z.object({
 
 export async function createScorecard(formData: FormData): Promise<ActionResult> {
   const session = await requireSession();
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
 
   if (session.role !== "admin") {
     const settings = await getAppSettings();
@@ -84,6 +94,19 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
       return { ok: false, error: "Only admins can log a round on behalf of another player." };
     }
     if (!z.string().uuid().safeParse(onBehalfRaw).success) {
+      return { ok: false, error: "Invalid player selected." };
+    }
+    // Confirm the target player actually belongs to THIS admin's own
+    // society — without this check, an admin could log a round for a
+    // player id belonging to a completely different tenant, if they
+    // somehow obtained it (a leaked URL, a guessed id, etc.).
+    const { data: targetPlayer } = await supabase
+      .from("players")
+      .select("id")
+      .eq("id", onBehalfRaw)
+      .eq("society_id", societyId)
+      .maybeSingle();
+    if (!targetPlayer) {
       return { ok: false, error: "Invalid player selected." };
     }
     targetPlayerId = onBehalfRaw;
@@ -118,14 +141,16 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
 
   const { courseId, teeColor, roundType, playedAt, playingHandicap } = parsed.data;
 
-  const supabase = createServiceClient();
-
   // Re-fetch the course + holes server-side — never trust totals computed
-  // on the client. This is the authoritative calculation that gets stored.
+  // on the client. This is the authoritative calculation that gets
+  // stored. Scoping by society_id here means a courseId belonging to a
+  // different tenant is treated as not found, not as "found, and let's
+  // use their rates/hole layout."
   const { data: course, error: courseError } = await supabase
     .from("courses")
     .select("id, hole_count, handicap_cut_per_point, handicap_increase_per_point")
     .eq("id", courseId)
+    .eq("society_id", societyId)
     .single();
 
   if (courseError || !course) {
@@ -135,7 +160,8 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   const { data: allHoles, error: holesError } = await supabase
     .from("holes")
     .select("id, hole_number, par, stroke_index")
-    .eq("course_id", courseId);
+    .eq("course_id", courseId)
+    .eq("society_id", societyId);
 
   if (holesError || !allHoles) {
     return { ok: false, error: "Could not load this course's holes." };
@@ -190,6 +216,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
       total_stableford_points: summary.totalStablefordPoints,
       proposed_handicap_change: change,
       status: "pending_approval",
+      society_id: societyId,
     })
     .select("id")
     .single();
@@ -206,6 +233,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
       net_strokes: h.netStrokes,
       stableford_points: h.stablefordPoints,
       picked_up: h.pickedUp,
+      society_id: societyId,
     }))
   );
 
@@ -221,14 +249,21 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
 
 export async function getScorecardDetail(scorecardId: string) {
   await requireSession(); // just needs to be logged in — see note below
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
+  // Scoping this by society_id is the critical line in this function: an
+  // authenticated player from ANY society can view ANY scorecard's detail
+  // (see the Phase 7 note below) — but only within their OWN society.
+  // Without this filter, that Phase 7 openness would leak across tenants
+  // entirely, not just within one society.
   const { data: scorecard, error } = await supabase
     .from("scorecards")
     .select(
       "id, player_id, course_id, tee_color, round_type, playing_handicap, played_at, total_gross_stroke_play, total_net_stroke_play, total_stableford_points, proposed_handicap_change, status, reviewed_at"
     )
     .eq("id", scorecardId)
+    .eq("society_id", societyId)
     .single();
 
   if (error || !scorecard) return null;
@@ -238,18 +273,21 @@ export async function getScorecardDetail(scorecardId: string) {
   // to the owner would mean every non-owner click 404s — so this is now
   // open to any authenticated society member, matching how the rest of
   // the app already treats handicaps and results as shared/visible within
-  // the society rather than private to each player.
+  // the society rather than private to each player. "Within the society"
+  // is the operative phrase — see the society_id filter above.
 
   const { data: course } = await supabase
     .from("courses")
     .select("id, name, location, hole_count")
     .eq("id", scorecard.course_id)
+    .eq("society_id", societyId)
     .single();
 
   const { data: scores } = await supabase
     .from("scores")
     .select("id, hole_id, gross_strokes, net_strokes, stableford_points, picked_up, holes(hole_number, par, stroke_index)")
-    .eq("scorecard_id", scorecardId);
+    .eq("scorecard_id", scorecardId)
+    .eq("society_id", societyId);
 
   // See the comment in app/actions/approvals.ts's listPendingScorecards for
   // why this cast (of the whole array, before any property access) is
@@ -282,6 +320,7 @@ export async function getScorecardDetail(scorecardId: string) {
       .from("handicap_history")
       .select("adjustment_amount")
       .eq("scorecard_id", scorecardId)
+      .eq("society_id", societyId)
       .maybeSingle();
     appliedChange = historyRow?.adjustment_amount ?? null;
   }
@@ -309,6 +348,7 @@ const SOCIETY_FEED_LIMIT = 50;
  * society's round volume ever makes 50 feel too short. */
 export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
   await requireSession();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
   const { data, error } = await supabase
@@ -316,6 +356,7 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
     .select(
       "id, played_at, status, total_stableford_points, proposed_handicap_change, players!scorecards_player_id_fkey(first_name, last_name), courses(name)"
     )
+    .eq("society_id", societyId)
     .order("played_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(SOCIETY_FEED_LIMIT);
@@ -356,7 +397,24 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
 
 export async function deleteRound(scorecardId: string): Promise<ActionResult> {
   await requireAdmin();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
+
+  // The delete_round RPC operates purely by scorecard id, with no
+  // tenant awareness of its own — so the ownership check has to happen
+  // here, before calling it. Without this, an admin could delete ANY
+  // scorecard in ANY society just by knowing/guessing its id, since the
+  // RPC itself would happily act on it.
+  const { data: target } = await supabase
+    .from("scorecards")
+    .select("id")
+    .eq("id", scorecardId)
+    .eq("society_id", societyId)
+    .maybeSingle();
+
+  if (!target) {
+    return { ok: false, error: "Round not found." };
+  }
 
   // Cast bypasses TypeScript's .rpc() argument-shape check — see the
   // identical comment in app/actions/approvals.ts's approveScorecard for

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import { getCurrentSocietyId } from "@/lib/tenant";
 import { logout } from "@/app/actions/auth";
 import { getAppSettings } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function DashboardPage() {
   const session = await requireSession();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
   const [{ data: player }, settings] = await Promise.all([
@@ -16,6 +18,7 @@ export default async function DashboardPage() {
       .from("players")
       .select("first_name, last_name, current_handicap, role")
       .eq("id", session.playerId)
+      .eq("society_id", societyId)
       .single(),
     getAppSettings(),
   ]);

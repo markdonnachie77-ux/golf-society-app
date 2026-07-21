@@ -2,13 +2,15 @@
 
 import { requireSession, requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import { getCurrentSocietyId } from "@/lib/tenant";
 import type { ActionResult } from "@/app/actions/auth";
 
 /**
  * Known setting keys. Adding a new setting means: add its key here, add a
  * field + default to AppSettings/DEFAULTS below, and add a row for it in
  * getAppSettings' mapping. No migration needed — app_settings is a plain
- * key/value table (see 0014_app_settings.sql) — just insert/update a row.
+ * key/value table (see 0014_app_settings.sql, re-keyed per-society in
+ * 0015_future_proof_multi_tenancy.sql) — just insert/update a row.
  */
 export type SettingKey = "players_can_log_own_rounds";
 
@@ -30,9 +32,18 @@ const DEFAULTS: AppSettings = {
  * exactly like today — nothing silently breaks for an existing install. */
 export async function getAppSettings(): Promise<AppSettings> {
   await requireSession();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
-  const { data, error } = await supabase.from("app_settings").select("key, value");
+  // app_settings' primary key is (society_id, key) as of
+  // 0015_future_proof_multi_tenancy.sql — without this filter, every
+  // society's settings rows would come back mixed together, and the
+  // byKey map below would end up keyed only by `key`, silently picking
+  // up whichever society's row happened to arrive for it.
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .eq("society_id", societyId);
 
   if (error || !data) return { ...DEFAULTS };
 
@@ -47,16 +58,25 @@ export async function getAppSettings(): Promise<AppSettings> {
 
 export async function updateSetting(key: SettingKey, value: boolean): Promise<ActionResult> {
   const session = await requireAdmin();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
+  // onConflict must match the table's actual unique constraint —
+  // (society_id, key), not `key` alone, since 0015 re-keyed this table
+  // specifically so each society can set this independently. Using the
+  // old "key" onConflict target here would either error (no matching
+  // constraint) or, worse, silently upsert against the wrong constraint
+  // if one still existed — this was a real, easy-to-miss consequence of
+  // the earlier schema change that needed catching here.
   const { error } = await supabase.from("app_settings").upsert(
     {
       key,
       value,
+      society_id: societyId,
       updated_by: session.playerId,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "key" }
+    { onConflict: "society_id,key" }
   );
 
   if (error) {

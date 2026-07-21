@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import { getCurrentSocietyId } from "@/lib/tenant";
 import type { ActionResult } from "@/app/actions/auth";
 
 export interface PendingScorecardRow {
@@ -21,6 +22,7 @@ export interface PendingScorecardRow {
 
 export async function listPendingScorecards(): Promise<PendingScorecardRow[]> {
   await requireAdmin();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
   const { data, error } = await supabase
@@ -29,6 +31,7 @@ export async function listPendingScorecards(): Promise<PendingScorecardRow[]> {
       "id, played_at, tee_color, round_type, total_gross_stroke_play, total_net_stroke_play, total_stableford_points, proposed_handicap_change, created_at, players!scorecards_player_id_fkey(first_name, last_name), courses(name)"
     )
     .eq("status", "pending_approval")
+    .eq("society_id", societyId)
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -89,7 +92,24 @@ export async function approveScorecard(
   appliedChange: number
 ): Promise<ActionResult> {
   const session = await requireAdmin();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
+
+  // approve_scorecard operates purely by scorecard id, with no tenant
+  // awareness of its own — so the ownership check has to happen here,
+  // before calling it. Without this, an admin could approve (and apply a
+  // real handicap change to) ANY scorecard in ANY society just by
+  // knowing/guessing its id.
+  const { data: target } = await supabase
+    .from("scorecards")
+    .select("id")
+    .eq("id", scorecardId)
+    .eq("society_id", societyId)
+    .maybeSingle();
+
+  if (!target) {
+    return { ok: false, error: "Round not found." };
+  }
 
   // Cast bypasses TypeScript's .rpc() argument-shape check specifically —
   // the hand-written `Functions` type in lib/database.types.ts (no
@@ -119,7 +139,21 @@ export async function approveScorecard(
 
 export async function rejectScorecard(scorecardId: string): Promise<ActionResult> {
   const session = await requireAdmin();
+  const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
+
+  // Same reasoning as approveScorecard above — reject_scorecard has no
+  // tenant awareness of its own, so the ownership check happens here.
+  const { data: target } = await supabase
+    .from("scorecards")
+    .select("id")
+    .eq("id", scorecardId)
+    .eq("society_id", societyId)
+    .maybeSingle();
+
+  if (!target) {
+    return { ok: false, error: "Round not found." };
+  }
 
   const { error } = await (supabase.rpc as any)("reject_scorecard", {
     p_scorecard_id: scorecardId,
