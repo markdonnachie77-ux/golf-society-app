@@ -162,6 +162,70 @@ assumptions the spec didn't pin down explicitly — both flagged with an
 - Stableford points flatten at 5 for anything better than an albatross
   (net −3), since the spec's table doesn't define a rate beyond that.
 
+## Future-proofing for multi-tenancy (not built — schema only)
+
+If this app is ever sold to multiple societies, there are two very
+different shapes that could take:
+
+- **One deployment per customer** (what you have today): each society
+  gets their own Vercel project + their own Supabase project. Perfect
+  data isolation (different Postgres instances entirely), but doesn't
+  scale operationally past a handful of customers — every migration,
+  every bug fix, has to be applied to every customer's database
+  individually.
+- **True multi-tenant**: one deployment, one database, every table
+  scoped by a `society_id`. Scales to hundreds of customers on one
+  codebase, but the stakes for getting tenant isolation wrong are much
+  higher than any bug in a single-tenant app — a missed filter doesn't
+  just show a wrong number, it can leak one society's data to another.
+
+`supabase/migrations/0015_future_proof_multi_tenancy.sql` does the cheap
+part of preparing for the second option, **without actually building
+multi-tenancy**:
+
+- A `societies` table, seeded with exactly one row (today's society, a
+  fixed id: `00000000-0000-0000-0000-000000000001`)
+- Every existing table gets a `society_id` column, including
+  `holes`/`scores`/`handicap_history` where it's technically derivable
+  via a join through their parent — duplicated directly onto every row
+  anyway so a future RLS policy can check it without a join
+- **Every new column has a DEFAULT pointing at that one society**, which
+  is what makes this migration a complete no-op for existing code —
+  every `.insert()` across the app, none of which mention `society_id`,
+  keeps working completely unchanged
+- `app_settings`' primary key changed from `key` alone to
+  `(society_id, key)`, since settings need to be per-society once a
+  second one exists (society A might restrict self-logging, society B
+  might not) — re-keying now, with one row, avoids a much more painful
+  migration once real per-society settings data exists
+
+**What this deliberately does NOT do** — all real application-layer work
+for whenever (if ever) a second society actually exists:
+- No RLS policy anywhere actually checks `society_id`. Doing that
+  properly needs a per-request session variable set by application code
+  (`set_config('app.current_society_id', ...)`), which doesn't exist —
+  this app currently does all authorization in code (`requireSession()`/
+  `requireAdmin()`), not RLS, for the reasons in
+  `0007_rls_policies.sql`. For genuine tenant isolation, RLS as a
+  database-level backstop becomes much more valuable than it is
+  today — the cost of a missed filter goes from "wrong number displayed"
+  to "cross-tenant data exposure."
+- No tenant resolution (subdomain routing, a society picker, anything
+  that determines "which society is this request for")
+- No changes to any server action to filter by `society_id` — every
+  query today still implicitly operates over the one society, because
+  there's only one
+- No platform-admin layer for managing multiple societies (creating one,
+  suspending one, seeing usage across all of them) — today's single
+  `admin` role is scoped to one society's own data, not a
+  vendor-management role
+- Registration (`/register`) doesn't ask "which society" — there's
+  nowhere else to go
+
+None of that is hard to reason about later — it's real, contained work,
+not a rewrite — but it's real work, not schema. This migration just makes
+that later work smaller.
+
 ## Application settings (`/admin/settings`)
 
 A general, extensible settings store — `app_settings` is a plain

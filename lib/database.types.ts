@@ -13,6 +13,12 @@
 // If you regenerate this file from `supabase gen types`, it already
 // includes accurate Relationships for you — this hand-written version
 // just needed to catch up to that format.
+//
+// society_id (added in 0015_future_proof_multi_tenancy.sql): every table
+// has one, marked OPTIONAL on every Insert type here because the database
+// column has a DEFAULT — this is what keeps every existing .insert() call
+// across the app compiling and working unchanged. Don't make society_id
+// required on any Insert type unless the DB default is also removed.
 
 export type PlayerRole = "player" | "admin";
 export type TeeColor = "white" | "yellow";
@@ -22,6 +28,22 @@ export type ScorecardStatus = "pending_approval" | "approved" | "rejected";
 export interface Database {
   public: {
     Tables: {
+      societies: {
+        Row: {
+          id: string;
+          name: string;
+          slug: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          slug: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["societies"]["Insert"]>;
+        Relationships: [];
+      };
       players: {
         Row: {
           id: string;
@@ -32,6 +54,7 @@ export interface Database {
           pin_hash: string;
           role: PlayerRole;
           created_at: string;
+          society_id: string;
         };
         Insert: {
           id?: string;
@@ -42,9 +65,18 @@ export interface Database {
           pin_hash: string;
           role?: PlayerRole;
           created_at?: string;
+          society_id?: string;
         };
         Update: Partial<Database["public"]["Tables"]["players"]["Insert"]>;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "players_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       courses: {
         Row: {
@@ -55,6 +87,7 @@ export interface Database {
           handicap_cut_per_point: number;
           handicap_increase_per_point: number;
           created_at: string;
+          society_id: string;
         };
         Insert: {
           id?: string;
@@ -64,9 +97,18 @@ export interface Database {
           handicap_cut_per_point?: number;
           handicap_increase_per_point?: number;
           created_at?: string;
+          society_id?: string;
         };
         Update: Partial<Database["public"]["Tables"]["courses"]["Insert"]>;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "courses_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       holes: {
         Row: {
@@ -77,6 +119,7 @@ export interface Database {
           stroke_index: number;
           white_yards: number | null;
           yellow_yards: number | null;
+          society_id: string;
         };
         Insert: {
           id?: string;
@@ -86,6 +129,7 @@ export interface Database {
           stroke_index: number;
           white_yards?: number | null;
           yellow_yards?: number | null;
+          society_id?: string;
         };
         Update: Partial<Database["public"]["Tables"]["holes"]["Insert"]>;
         Relationships: [
@@ -94,6 +138,13 @@ export interface Database {
             columns: ["course_id"];
             isOneToOne: false;
             referencedRelation: "courses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "holes_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
             referencedColumns: ["id"];
           }
         ];
@@ -115,6 +166,7 @@ export interface Database {
           reviewed_by: string | null;
           reviewed_at: string | null;
           created_at: string;
+          society_id: string;
         };
         Insert: {
           id?: string;
@@ -132,6 +184,7 @@ export interface Database {
           reviewed_by?: string | null;
           reviewed_at?: string | null;
           created_at?: string;
+          society_id?: string;
         };
         Update: Partial<Database["public"]["Tables"]["scorecards"]["Insert"]>;
         Relationships: [
@@ -155,6 +208,13 @@ export interface Database {
             isOneToOne: false;
             referencedRelation: "players";
             referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "scorecards_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
+            referencedColumns: ["id"];
           }
         ];
       };
@@ -167,6 +227,7 @@ export interface Database {
           net_strokes: number | null;
           stableford_points: number;
           picked_up: boolean;
+          society_id: string;
         };
         Insert: {
           id?: string;
@@ -176,6 +237,7 @@ export interface Database {
           net_strokes?: number | null;
           stableford_points: number;
           picked_up?: boolean;
+          society_id?: string;
         };
         Update: Partial<Database["public"]["Tables"]["scores"]["Insert"]>;
         Relationships: [
@@ -192,6 +254,13 @@ export interface Database {
             isOneToOne: false;
             referencedRelation: "holes";
             referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "scores_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
+            referencedColumns: ["id"];
           }
         ];
       };
@@ -204,6 +273,7 @@ export interface Database {
           adjustment_amount: number;
           effective_date: string;
           notes: string | null;
+          society_id: string;
         };
         Insert: {
           id?: string;
@@ -213,6 +283,7 @@ export interface Database {
           adjustment_amount: number;
           effective_date?: string;
           notes?: string | null;
+          society_id?: string;
         };
         Update: Partial<Database["public"]["Tables"]["handicap_history"]["Insert"]>;
         Relationships: [
@@ -229,6 +300,13 @@ export interface Database {
             isOneToOne: false;
             referencedRelation: "scorecards";
             referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "handicap_history_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
+            referencedColumns: ["id"];
           }
         ];
       };
@@ -238,12 +316,14 @@ export interface Database {
           value: unknown;
           updated_at: string;
           updated_by: string | null;
+          society_id: string;
         };
         Insert: {
           key: string;
           value: unknown;
           updated_at?: string;
           updated_by?: string | null;
+          society_id?: string;
         };
         Update: Partial<Database["public"]["Tables"]["app_settings"]["Insert"]>;
         Relationships: [
@@ -252,6 +332,13 @@ export interface Database {
             columns: ["updated_by"];
             isOneToOne: false;
             referencedRelation: "players";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "app_settings_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
             referencedColumns: ["id"];
           }
         ];
