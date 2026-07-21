@@ -2,11 +2,11 @@ import Link from "next/link";
 import { requireSession } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
-import { logout } from "@/app/actions/auth";
 import { getAppSettings } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
+import { LogoutButton } from "@/components/logout-button";
 
 export default async function DashboardPage() {
   const session = await requireSession();
@@ -36,11 +36,7 @@ export default async function DashboardPage() {
               {player ? `${player.first_name} ${player.last_name}` : "Dashboard"}
             </h1>
           </div>
-          <form action={logout}>
-            <Button type="submit" variant="outline" size="sm">
-              Log out
-            </Button>
-          </form>
+          <LogoutButton />
         </div>
 
         <nav className="mb-8 flex flex-wrap gap-2">
