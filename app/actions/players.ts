@@ -127,3 +127,21 @@ export async function adjustPlayerHandicap(
 
   return { ok: true };
 }
+
+export async function wipePlayerHistory(playerId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = createServiceClient();
+
+  // Cast bypasses TypeScript's .rpc() argument-shape check — see the
+  // identical comment in app/actions/approvals.ts's approveScorecard for
+  // why. No effect at runtime.
+  const { error } = await (supabase.rpc as any)("wipe_player_history", {
+    p_player_id: playerId,
+  });
+
+  if (error) {
+    return { ok: false, error: error.message || "Could not wipe this player's history." };
+  }
+
+  return { ok: true };
+}
