@@ -26,6 +26,25 @@ if (process.env.PLATFORM_ROOT_DOMAIN) {
 // hardcoded in app/layout.tsx's metadataBase, for consistency.
 allowedOrigins.push("evsgolfsociety.co.uk", "www.evsgolfsociety.co.uk");
 
+// next/image refuses to load any remote image whose domain isn't
+// explicitly allowlisted — needed now that uploaded hero photos (see
+// app/actions/settings.ts's uploadHeroPhoto) are served from Supabase
+// Storage's public URL rather than a local /public asset. Derived from
+// SUPABASE_URL rather than hardcoded, so this works automatically for
+// both the local Docker stack (http://127.0.0.1:54321) and the hosted
+// production project (https://<ref>.supabase.co) without needing a
+// separate config value to keep in sync.
+const remotePatterns = [];
+if (process.env.SUPABASE_URL) {
+  const supabaseUrl = new URL(process.env.SUPABASE_URL);
+  remotePatterns.push({
+    protocol: supabaseUrl.protocol.replace(":", ""),
+    hostname: supabaseUrl.hostname,
+    port: supabaseUrl.port || undefined,
+    pathname: "/storage/v1/object/public/**",
+  });
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -35,6 +54,9 @@ const nextConfig = {
     serverActions: {
       allowedOrigins,
     },
+  },
+  images: {
+    remotePatterns,
   },
 };
 
