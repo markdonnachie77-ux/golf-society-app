@@ -116,9 +116,9 @@ describe("netStrokesForHole", () => {
 
 describe("computeHoleResult / summarizeRound / computeRound", () => {
   const holes = [
-    { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: 5 }, // H=10 -> 1 stroke -> net 4 -> 2pts
-    { holeId: "h2", par: 3, strokeIndex: 15, grossStrokes: 3 }, // H=10, SI15>10 -> 0 strokes -> net 3 -> 2pts
-    { holeId: "h3", par: 5, strokeIndex: 5, grossStrokes: 5 }, // H=10, SI5<=10 -> 1 stroke -> net 4 -> 3pts (birdie)
+    { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: 5, pickedUp: false }, // H=10 -> 1 stroke -> net 4 -> 2pts
+    { holeId: "h2", par: 3, strokeIndex: 15, grossStrokes: 3, pickedUp: false }, // H=10, SI15>10 -> 0 strokes -> net 3 -> 2pts
+    { holeId: "h3", par: 5, strokeIndex: 5, grossStrokes: 5, pickedUp: false }, // H=10, SI5<=10 -> 1 stroke -> net 4 -> 3pts (birdie)
   ];
 
   it("computes each hole correctly and sums to the round total", () => {
@@ -132,12 +132,72 @@ describe("computeHoleResult / summarizeRound / computeRound", () => {
       totalGrossStrokePlay: 13,
       totalNetStrokePlay: 11,
       totalStablefordPoints: 7,
+      holesPickedUp: 0,
     });
   });
 
   it("summarizeRound matches computeRound's own summary for the same holes", () => {
     const holeResults = holes.map((h) => computeHoleResult(h, 10, "full_18"));
     expect(summarizeRound(holeResults)).toEqual(computeRound(holes, 10, "full_18").summary);
+  });
+});
+
+describe("picked-up (blob) holes", () => {
+  it("scores 0 points and has null gross/net strokes when picked up", () => {
+    const result = computeHoleResult(
+      { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: null, pickedUp: true },
+      10,
+      "full_18"
+    );
+    expect(result).toMatchObject({
+      grossStrokes: null,
+      netStrokes: null,
+      stablefordPoints: 0,
+      pickedUp: true,
+    });
+    // strokesReceived is still computed (harmless, just unused for scoring)
+    expect(result.strokesReceived).toBe(1);
+  });
+
+  it("throws if a hole is neither picked up nor has a gross score — a caller bug, not a valid state", () => {
+    expect(() =>
+      computeHoleResult(
+        { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: null, pickedUp: false },
+        10,
+        "full_18"
+      )
+    ).toThrow();
+  });
+
+  it("excludes picked-up holes from gross/net totals but still counts 0 Stableford points, and tracks the pick-up count", () => {
+    const holes = [
+      { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: 5, pickedUp: false }, // completed: 2pts (see fixture above)
+      { holeId: "h2", par: 3, strokeIndex: 15, grossStrokes: null, pickedUp: true }, // picked up: 0pts, no gross/net
+      { holeId: "h3", par: 5, strokeIndex: 5, grossStrokes: 5, pickedUp: false }, // completed: 3pts (birdie, see fixture above)
+    ];
+
+    const { summary } = computeRound(holes, 10, "full_18");
+
+    expect(summary).toEqual({
+      totalGrossStrokePlay: 10, // only h1 (5) + h3 (5), h2 excluded
+      totalNetStrokePlay: 8, // only h1 (4) + h3 (4), h2 excluded
+      totalStablefordPoints: 5, // h1 (2) + h2 (0) + h3 (3)
+      holesPickedUp: 1,
+    });
+  });
+
+  it("a round entirely of pick-ups scores 0 points and 0 totals with the pick-up count matching hole count", () => {
+    const holes = [
+      { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: null, pickedUp: true },
+      { holeId: "h2", par: 4, strokeIndex: 2, grossStrokes: null, pickedUp: true },
+    ];
+    const { summary } = computeRound(holes, 10, "full_18");
+    expect(summary).toEqual({
+      totalGrossStrokePlay: 0,
+      totalNetStrokePlay: 0,
+      totalStablefordPoints: 0,
+      holesPickedUp: 2,
+    });
   });
 });
 

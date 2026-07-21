@@ -49,6 +49,7 @@ export function NewScorecardForm({
   const [holes, setHoles] = React.useState<HoleRow[]>([]);
   const [loadingHoles, setLoadingHoles] = React.useState(false);
   const [grossByHole, setGrossByHole] = React.useState<Record<string, string>>({});
+  const [pickedUpByHole, setPickedUpByHole] = React.useState<Record<string, boolean>>({});
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
 
@@ -60,6 +61,7 @@ export function NewScorecardForm({
     setRoundType(null);
     setHoles([]);
     setGrossByHole({});
+    setPickedUpByHole({});
   }
 
   // A 9-hole course has exactly one valid round type — pick it automatically
@@ -79,6 +81,7 @@ export function NewScorecardForm({
       if (cancelled) return;
       setHoles(result);
       setGrossByHole(Object.fromEntries(result.map((h) => [h.id, ""])));
+      setPickedUpByHole(Object.fromEntries(result.map((h) => [h.id, false])));
       setLoadingHoles(false);
     });
     return () => {
@@ -86,8 +89,21 @@ export function NewScorecardForm({
     };
   }, [courseId, roundType]);
 
+  /** Toggling "picked up" on clears any entered gross score for that hole
+   * — they're mutually exclusive, so leaving a stale number behind would
+   * be misleading if the toggle were flipped back off later. */
+  function togglePickedUp(holeId: string) {
+    setPickedUpByHole((prev) => ({ ...prev, [holeId]: !prev[holeId] }));
+    setGrossByHole((prev) => ({ ...prev, [holeId]: "" }));
+  }
+
   const allScoresEntered =
-    holes.length > 0 && holes.every((h) => Number.isInteger(Number(grossByHole[h.id])) && Number(grossByHole[h.id]) >= 1);
+    holes.length > 0 &&
+    holes.every((h) => {
+      if (pickedUpByHole[h.id]) return true;
+      const v = Number(grossByHole[h.id]);
+      return Number.isInteger(v) && v >= 1;
+    });
 
   const preview = React.useMemo(() => {
     if (!allScoresEntered || !roundType || !selectedCourse) return null;
@@ -98,7 +114,8 @@ export function NewScorecardForm({
       holeId: h.id,
       par: h.par,
       strokeIndex: h.stroke_index,
-      grossStrokes: Number(grossByHole[h.id]),
+      grossStrokes: pickedUpByHole[h.id] ? null : Number(grossByHole[h.id]),
+      pickedUp: !!pickedUpByHole[h.id],
     }));
 
     const { summary } = computeRound(holeInputs, H, roundType);
@@ -108,7 +125,7 @@ export function NewScorecardForm({
     });
 
     return { summary, change };
-  }, [allScoresEntered, holes, grossByHole, playingHandicap, roundType, selectedCourse]);
+  }, [allScoresEntered, holes, grossByHole, pickedUpByHole, playingHandicap, roundType, selectedCourse]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -128,7 +145,13 @@ export function NewScorecardForm({
     formData.set("playingHandicap", playingHandicap);
     formData.set(
       "scoresJson",
-      JSON.stringify(holes.map((h) => ({ holeId: h.id, grossStrokes: Number(grossByHole[h.id]) })))
+      JSON.stringify(
+        holes.map((h) => ({
+          holeId: h.id,
+          grossStrokes: pickedUpByHole[h.id] ? null : Number(grossByHole[h.id]),
+          pickedUp: !!pickedUpByHole[h.id],
+        }))
+      )
     );
 
     const result: ActionResult | undefined = await createScorecard(formData);
@@ -231,6 +254,9 @@ export function NewScorecardForm({
       {roundType && !loadingHoles && holes.length > 0 && (
         <div>
           <Label>Scores</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Can't score at least 1 point on a hole? Pick up rather than holing out.
+          </p>
           <div className="mt-3 overflow-x-auto rounded-lg border border-border bg-card">
             <div className="grid grid-cols-[3rem_3rem_4rem_1fr] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
               <span>Hole</span>
@@ -249,18 +275,41 @@ export function NewScorecardForm({
                   <span className="font-numeral text-sm text-muted-foreground">
                     {hole.stroke_index}
                   </span>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={20}
-                    inputMode="numeric"
-                    value={grossByHole[hole.id] ?? ""}
-                    onChange={(e) =>
-                      setGrossByHole((prev) => ({ ...prev, [hole.id]: e.target.value }))
-                    }
-                    disabled={pending}
-                    className="font-numeral w-full min-w-0"
-                  />
+                  <div className="flex items-center gap-2">
+                    {pickedUpByHole[hole.id] ? (
+                      <button
+                        type="button"
+                        onClick={() => togglePickedUp(hole.id)}
+                        disabled={pending}
+                        className="flex h-11 flex-1 items-center justify-center rounded-md border border-accent bg-accent/10 font-numeral text-sm text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
+                      >
+                        Picked up — tap to undo
+                      </button>
+                    ) : (
+                      <>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={20}
+                          inputMode="numeric"
+                          value={grossByHole[hole.id] ?? ""}
+                          onChange={(e) =>
+                            setGrossByHole((prev) => ({ ...prev, [hole.id]: e.target.value }))
+                          }
+                          disabled={pending}
+                          className="font-numeral w-full min-w-0"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => togglePickedUp(hole.id)}
+                          disabled={pending}
+                          className="shrink-0 whitespace-nowrap text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+                        >
+                          Pick up
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </React.Fragment>
             ))}
@@ -293,6 +342,13 @@ export function NewScorecardForm({
             </span>
             .
           </p>
+          {preview.summary.holesPickedUp > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Gross/Net totals exclude {preview.summary.holesPickedUp} picked-up hole
+              {preview.summary.holesPickedUp === 1 ? "" : "s"} — Stableford points still count
+              them as 0.
+            </p>
+          )}
         </div>
       )}
 

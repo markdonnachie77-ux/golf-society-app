@@ -38,10 +38,16 @@ export async function getHolesForRound(courseId: string, roundType: RoundType) {
 
 // ---------- Submission ----------
 
-const scoreRowSchema = z.object({
-  holeId: z.string().uuid(),
-  grossStrokes: z.number().int().min(1).max(20),
-});
+const scoreRowSchema = z
+  .object({
+    holeId: z.string().uuid(),
+    grossStrokes: z.number().int().min(1).max(20).nullable(),
+    pickedUp: z.boolean(),
+  })
+  .refine(
+    (row) => (row.pickedUp && row.grossStrokes === null) || (!row.pickedUp && row.grossStrokes !== null),
+    { message: "Each hole needs either a gross score (1-20) or to be marked picked up." }
+  );
 
 const submitSchema = z.object({
   courseId: z.string().uuid("Select a course"),
@@ -66,12 +72,15 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     return { ok: false, error: "Please fill in every field before submitting." };
   }
 
-  let scoreRows: { holeId: string; grossStrokes: number }[] = [];
+  let scoreRows: { holeId: string; grossStrokes: number | null; pickedUp: boolean }[] = [];
   try {
     const rawScores = JSON.parse(String(formData.get("scoresJson") ?? "[]"));
     const scoresParsed = z.array(scoreRowSchema).safeParse(rawScores);
     if (!scoresParsed.success) {
-      return { ok: false, error: "Enter a valid gross score (1-20 strokes) for every hole." };
+      return {
+        ok: false,
+        error: "Enter a valid gross score (1-20 strokes) or mark picked up for every hole.",
+      };
     }
     scoreRows = scoresParsed.data;
   } catch {
@@ -119,14 +128,18 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     return { ok: false, error: "Scores don't match this round's holes. Please try again." };
   }
 
-  const grossByHoleId = new Map(scoreRows.map((s) => [s.holeId, s.grossStrokes]));
+  const scoreByHoleId = new Map(scoreRows.map((s) => [s.holeId, s]));
 
-  const holeInputs = expectedHoles.map((h) => ({
-    holeId: h.id,
-    par: h.par,
-    strokeIndex: h.stroke_index,
-    grossStrokes: grossByHoleId.get(h.id)!,
-  }));
+  const holeInputs = expectedHoles.map((h) => {
+    const score = scoreByHoleId.get(h.id)!;
+    return {
+      holeId: h.id,
+      par: h.par,
+      strokeIndex: h.stroke_index,
+      grossStrokes: score.grossStrokes,
+      pickedUp: score.pickedUp,
+    };
+  });
 
   const { holeResults, summary } = computeRound(holeInputs, playingHandicap, roundType);
   const change = proposedHandicapChange(summary.totalStablefordPoints, roundType, {
@@ -163,6 +176,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
       gross_strokes: h.grossStrokes,
       net_strokes: h.netStrokes,
       stableford_points: h.stablefordPoints,
+      picked_up: h.pickedUp,
     }))
   );
 
@@ -205,7 +219,7 @@ export async function getScorecardDetail(scorecardId: string) {
 
   const { data: scores } = await supabase
     .from("scores")
-    .select("id, hole_id, gross_strokes, net_strokes, stableford_points, holes(hole_number, par, stroke_index)")
+    .select("id, hole_id, gross_strokes, net_strokes, stableford_points, picked_up, holes(hole_number, par, stroke_index)")
     .eq("scorecard_id", scorecardId);
 
   // See the comment in app/actions/approvals.ts's listPendingScorecards for
@@ -214,9 +228,10 @@ export async function getScorecardDetail(scorecardId: string) {
   interface RawScoreRow {
     id: string;
     hole_id: string;
-    gross_strokes: number;
-    net_strokes: number;
+    gross_strokes: number | null;
+    net_strokes: number | null;
     stableford_points: number;
+    picked_up: boolean;
     holes: { hole_number: number; par: number; stroke_index: number } | null;
   }
   const rawScores = (scores ?? []) as unknown as RawScoreRow[];

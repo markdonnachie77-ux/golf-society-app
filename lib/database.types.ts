@@ -163,17 +163,19 @@ export interface Database {
           id: string;
           scorecard_id: string;
           hole_id: string;
-          gross_strokes: number;
-          net_strokes: number;
+          gross_strokes: number | null;
+          net_strokes: number | null;
           stableford_points: number;
+          picked_up: boolean;
         };
         Insert: {
           id?: string;
           scorecard_id: string;
           hole_id: string;
-          gross_strokes: number;
-          net_strokes: number;
+          gross_strokes?: number | null;
+          net_strokes?: number | null;
           stableford_points: number;
+          picked_up?: boolean;
         };
         Update: Partial<Database["public"]["Tables"]["scores"]["Insert"]>;
         Relationships: [

@@ -1,0 +1,610 @@
+diff --git a/README.md b/README.md
+index 4f7f06f..e93182a 100644
+--- a/README.md
++++ b/README.md
+@@ -162,6 +162,30 @@ assumptions the spec didn't pin down explicitly — both flagged with an
+ - Stableford points flatten at 5 for anything better than an albatross
+   (net −3), since the spec's table doesn't define a rate beyond that.
+ 
++## Picking up ("blobbing" a hole)
++
++Not in the original spec — added as a society rule to speed up play: once a
++player can no longer score at least 1 Stableford point on a hole, they can
++pick up rather than finishing it. That hole scores 0 points and has no real
++gross/net stroke count.
++
++Worth knowing:
++- **`total_gross_stroke_play` / `total_net_stroke_play` only ever sum
++  completed holes.** A round with any picked-up holes has an inherently
++  partial gross/net total — the UI shows a note when this applies
++  (`/rounds/new`'s live preview and `/rounds/[id]`'s result card), but if
++  you ever query these columns directly, don't assume they represent a
++  full round's stroke play.
++- The `scores` table enforces this at the database level: a row is either
++  `picked_up = true` with null gross/net strokes and 0 points, or
++  `picked_up = false` with all three populated — see the CHECK constraint
++  in `supabase/migrations/0013_add_picked_up_to_scores.sql`.
++- This is entirely self-reported, same as gross scores — there's no
++  validation preventing someone from picking up "too early" (e.g. after
++  only 2 strokes on a par 4). Golf societies run on the honor system for
++  self-scoring generally, and this follows the same trust model rather
++  than trying to enforce the rule server-side.
++
+ ## A deliberate access-control change (Phase 7)
+ 
+ Through Phase 5 and 6, `/rounds/[id]` was viewable only by the scorecard's
+diff --git a/app/actions/scorecards.ts b/app/actions/scorecards.ts
+index d550d2e..ee9e4ef 100644
+--- a/app/actions/scorecards.ts
++++ b/app/actions/scorecards.ts
+@@ -38,10 +38,16 @@ export async function getHolesForRound(courseId: string, roundType: RoundType) {
+ 
+ // ---------- Submission ----------
+ 
+-const scoreRowSchema = z.object({
+-  holeId: z.string().uuid(),
+-  grossStrokes: z.number().int().min(1).max(20),
+-});
++const scoreRowSchema = z
++  .object({
++    holeId: z.string().uuid(),
++    grossStrokes: z.number().int().min(1).max(20).nullable(),
++    pickedUp: z.boolean(),
++  })
++  .refine(
++    (row) => (row.pickedUp && row.grossStrokes === null) || (!row.pickedUp && row.grossStrokes !== null),
++    { message: "Each hole needs either a gross score (1-20) or to be marked picked up." }
++  );
+ 
+ const submitSchema = z.object({
+   courseId: z.string().uuid("Select a course"),
+@@ -66,12 +72,15 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+     return { ok: false, error: "Please fill in every field before submitting." };
+   }
+ 
+-  let scoreRows: { holeId: string; grossStrokes: number }[] = [];
++  let scoreRows: { holeId: string; grossStrokes: number | null; pickedUp: boolean }[] = [];
+   try {
+     const rawScores = JSON.parse(String(formData.get("scoresJson") ?? "[]"));
+     const scoresParsed = z.array(scoreRowSchema).safeParse(rawScores);
+     if (!scoresParsed.success) {
+-      return { ok: false, error: "Enter a valid gross score (1-20 strokes) for every hole." };
++      return {
++        ok: false,
++        error: "Enter a valid gross score (1-20 strokes) or mark picked up for every hole.",
++      };
+     }
+     scoreRows = scoresParsed.data;
+   } catch {
+@@ -119,14 +128,18 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+     return { ok: false, error: "Scores don't match this round's holes. Please try again." };
+   }
+ 
+-  const grossByHoleId = new Map(scoreRows.map((s) => [s.holeId, s.grossStrokes]));
++  const scoreByHoleId = new Map(scoreRows.map((s) => [s.holeId, s]));
+ 
+-  const holeInputs = expectedHoles.map((h) => ({
+-    holeId: h.id,
+-    par: h.par,
+-    strokeIndex: h.stroke_index,
+-    grossStrokes: grossByHoleId.get(h.id)!,
+-  }));
++  const holeInputs = expectedHoles.map((h) => {
++    const score = scoreByHoleId.get(h.id)!;
++    return {
++      holeId: h.id,
++      par: h.par,
++      strokeIndex: h.stroke_index,
++      grossStrokes: score.grossStrokes,
++      pickedUp: score.pickedUp,
++    };
++  });
+ 
+   const { holeResults, summary } = computeRound(holeInputs, playingHandicap, roundType);
+   const change = proposedHandicapChange(summary.totalStablefordPoints, roundType, {
+@@ -163,6 +176,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+       gross_strokes: h.grossStrokes,
+       net_strokes: h.netStrokes,
+       stableford_points: h.stablefordPoints,
++      picked_up: h.pickedUp,
+     }))
+   );
+ 
+@@ -205,7 +219,7 @@ export async function getScorecardDetail(scorecardId: string) {
+ 
+   const { data: scores } = await supabase
+     .from("scores")
+-    .select("id, hole_id, gross_strokes, net_strokes, stableford_points, holes(hole_number, par, stroke_index)")
++    .select("id, hole_id, gross_strokes, net_strokes, stableford_points, picked_up, holes(hole_number, par, stroke_index)")
+     .eq("scorecard_id", scorecardId);
+ 
+   // See the comment in app/actions/approvals.ts's listPendingScorecards for
+@@ -214,9 +228,10 @@ export async function getScorecardDetail(scorecardId: string) {
+   interface RawScoreRow {
+     id: string;
+     hole_id: string;
+-    gross_strokes: number;
+-    net_strokes: number;
++    gross_strokes: number | null;
++    net_strokes: number | null;
+     stableford_points: number;
++    picked_up: boolean;
+     holes: { hole_number: number; par: number; stroke_index: number } | null;
+   }
+   const rawScores = (scores ?? []) as unknown as RawScoreRow[];
+diff --git a/app/rounds/[id]/page.tsx b/app/rounds/[id]/page.tsx
+index 598e41b..bc2bc3d 100644
+--- a/app/rounds/[id]/page.tsx
++++ b/app/rounds/[id]/page.tsx
+@@ -13,9 +13,10 @@ import { BrandEyebrow } from "@/components/brand-eyebrow";
+ interface ScoreRow {
+   id: string;
+   hole_id: string;
+-  gross_strokes: number;
+-  net_strokes: number;
++  gross_strokes: number | null;
++  net_strokes: number | null;
+   stableford_points: number;
++  picked_up: boolean;
+   holes: { hole_number: number; par: number; stroke_index: number } | null;
+ }
+ 
+@@ -34,6 +35,7 @@ export default async function ScorecardDetailPage({
+ 
+   const { scorecard, course, scores, appliedChange } = result;
+   const rows = scores as unknown as ScoreRow[];
++  const pickedUpCount = rows.filter((r) => r.picked_up).length;
+ 
+   return (
+     <main className="min-h-screen bg-background px-4 py-12">
+@@ -79,6 +81,12 @@ export default async function ScorecardDetailPage({
+               </div>
+             </div>
+ 
++            {pickedUpCount > 0 && (
++              <p className="mt-3 text-xs text-muted-foreground">
++                Gross/Net totals exclude {pickedUpCount} picked-up hole{pickedUpCount === 1 ? "" : "s"}.
++              </p>
++            )}
++
+             <p className="mt-4 text-sm text-muted-foreground">
+               {scorecard.status === "pending_approval" &&
+                 `Proposed handicap change (pending admin approval): ${
+@@ -116,8 +124,16 @@ export default async function ScorecardDetailPage({
+                 <span>{row.holes?.hole_number}</span>
+                 <span className="text-muted-foreground">{row.holes?.par}</span>
+                 <span className="text-muted-foreground">{row.holes?.stroke_index}</span>
+-                <span>{row.gross_strokes}</span>
+-                <span className="text-muted-foreground">{row.net_strokes}</span>
++                {row.picked_up ? (
++                  <span className="col-span-2 text-xs uppercase tracking-wide text-muted-foreground">
++                    Picked up
++                  </span>
++                ) : (
++                  <>
++                    <span>{row.gross_strokes}</span>
++                    <span className="text-muted-foreground">{row.net_strokes}</span>
++                  </>
++                )}
+                 <span className="font-semibold">{row.stableford_points}</span>
+               </div>
+             </div>
+diff --git a/components/new-scorecard-form.tsx b/components/new-scorecard-form.tsx
+index a0470c3..ef7546f 100644
+--- a/components/new-scorecard-form.tsx
++++ b/components/new-scorecard-form.tsx
+@@ -49,6 +49,7 @@ export function NewScorecardForm({
+   const [holes, setHoles] = React.useState<HoleRow[]>([]);
+   const [loadingHoles, setLoadingHoles] = React.useState(false);
+   const [grossByHole, setGrossByHole] = React.useState<Record<string, string>>({});
++  const [pickedUpByHole, setPickedUpByHole] = React.useState<Record<string, boolean>>({});
+   const [error, setError] = React.useState<string | null>(null);
+   const [pending, setPending] = React.useState(false);
+ 
+@@ -60,6 +61,7 @@ export function NewScorecardForm({
+     setRoundType(null);
+     setHoles([]);
+     setGrossByHole({});
++    setPickedUpByHole({});
+   }
+ 
+   // A 9-hole course has exactly one valid round type — pick it automatically
+@@ -79,6 +81,7 @@ export function NewScorecardForm({
+       if (cancelled) return;
+       setHoles(result);
+       setGrossByHole(Object.fromEntries(result.map((h) => [h.id, ""])));
++      setPickedUpByHole(Object.fromEntries(result.map((h) => [h.id, false])));
+       setLoadingHoles(false);
+     });
+     return () => {
+@@ -86,8 +89,21 @@ export function NewScorecardForm({
+     };
+   }, [courseId, roundType]);
+ 
++  /** Toggling "picked up" on clears any entered gross score for that hole
++   * — they're mutually exclusive, so leaving a stale number behind would
++   * be misleading if the toggle were flipped back off later. */
++  function togglePickedUp(holeId: string) {
++    setPickedUpByHole((prev) => ({ ...prev, [holeId]: !prev[holeId] }));
++    setGrossByHole((prev) => ({ ...prev, [holeId]: "" }));
++  }
++
+   const allScoresEntered =
+-    holes.length > 0 && holes.every((h) => Number.isInteger(Number(grossByHole[h.id])) && Number(grossByHole[h.id]) >= 1);
++    holes.length > 0 &&
++    holes.every((h) => {
++      if (pickedUpByHole[h.id]) return true;
++      const v = Number(grossByHole[h.id]);
++      return Number.isInteger(v) && v >= 1;
++    });
+ 
+   const preview = React.useMemo(() => {
+     if (!allScoresEntered || !roundType || !selectedCourse) return null;
+@@ -98,7 +114,8 @@ export function NewScorecardForm({
+       holeId: h.id,
+       par: h.par,
+       strokeIndex: h.stroke_index,
+-      grossStrokes: Number(grossByHole[h.id]),
++      grossStrokes: pickedUpByHole[h.id] ? null : Number(grossByHole[h.id]),
++      pickedUp: !!pickedUpByHole[h.id],
+     }));
+ 
+     const { summary } = computeRound(holeInputs, H, roundType);
+@@ -108,7 +125,7 @@ export function NewScorecardForm({
+     });
+ 
+     return { summary, change };
+-  }, [allScoresEntered, holes, grossByHole, playingHandicap, roundType, selectedCourse]);
++  }, [allScoresEntered, holes, grossByHole, pickedUpByHole, playingHandicap, roundType, selectedCourse]);
+ 
+   async function handleSubmit(e: React.FormEvent) {
+     e.preventDefault();
+@@ -128,7 +145,13 @@ export function NewScorecardForm({
+     formData.set("playingHandicap", playingHandicap);
+     formData.set(
+       "scoresJson",
+-      JSON.stringify(holes.map((h) => ({ holeId: h.id, grossStrokes: Number(grossByHole[h.id]) })))
++      JSON.stringify(
++        holes.map((h) => ({
++          holeId: h.id,
++          grossStrokes: pickedUpByHole[h.id] ? null : Number(grossByHole[h.id]),
++          pickedUp: !!pickedUpByHole[h.id],
++        }))
++      )
+     );
+ 
+     const result: ActionResult | undefined = await createScorecard(formData);
+@@ -231,6 +254,9 @@ export function NewScorecardForm({
+       {roundType && !loadingHoles && holes.length > 0 && (
+         <div>
+           <Label>Scores</Label>
++          <p className="mt-1 text-xs text-muted-foreground">
++            Can't score at least 1 point on a hole? Pick up rather than holing out.
++          </p>
+           <div className="mt-3 overflow-x-auto rounded-lg border border-border bg-card">
+             <div className="grid grid-cols-[3rem_3rem_4rem_1fr] gap-2 px-4 py-2 text-xs uppercase tracking-wide text-muted-foreground">
+               <span>Hole</span>
+@@ -249,18 +275,41 @@ export function NewScorecardForm({
+                   <span className="font-numeral text-sm text-muted-foreground">
+                     {hole.stroke_index}
+                   </span>
+-                  <Input
+-                    type="number"
+-                    min={1}
+-                    max={20}
+-                    inputMode="numeric"
+-                    value={grossByHole[hole.id] ?? ""}
+-                    onChange={(e) =>
+-                      setGrossByHole((prev) => ({ ...prev, [hole.id]: e.target.value }))
+-                    }
+-                    disabled={pending}
+-                    className="font-numeral w-full min-w-0"
+-                  />
++                  <div className="flex items-center gap-2">
++                    {pickedUpByHole[hole.id] ? (
++                      <button
++                        type="button"
++                        onClick={() => togglePickedUp(hole.id)}
++                        disabled={pending}
++                        className="flex h-11 flex-1 items-center justify-center rounded-md border border-accent bg-accent/10 font-numeral text-sm text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
++                      >
++                        Picked up — tap to undo
++                      </button>
++                    ) : (
++                      <>
++                        <Input
++                          type="number"
++                          min={1}
++                          max={20}
++                          inputMode="numeric"
++                          value={grossByHole[hole.id] ?? ""}
++                          onChange={(e) =>
++                            setGrossByHole((prev) => ({ ...prev, [hole.id]: e.target.value }))
++                          }
++                          disabled={pending}
++                          className="font-numeral w-full min-w-0"
++                        />
++                        <button
++                          type="button"
++                          onClick={() => togglePickedUp(hole.id)}
++                          disabled={pending}
++                          className="shrink-0 whitespace-nowrap text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
++                        >
++                          Pick up
++                        </button>
++                      </>
++                    )}
++                  </div>
+                 </div>
+               </React.Fragment>
+             ))}
+@@ -293,6 +342,13 @@ export function NewScorecardForm({
+             </span>
+             .
+           </p>
++          {preview.summary.holesPickedUp > 0 && (
++            <p className="mt-2 text-xs text-muted-foreground">
++              Gross/Net totals exclude {preview.summary.holesPickedUp} picked-up hole
++              {preview.summary.holesPickedUp === 1 ? "" : "s"} — Stableford points still count
++              them as 0.
++            </p>
++          )}
+         </div>
+       )}
+ 
+diff --git a/lib/__tests__/golf-math.test.ts b/lib/__tests__/golf-math.test.ts
+index afaa2bc..eab3a84 100644
+--- a/lib/__tests__/golf-math.test.ts
++++ b/lib/__tests__/golf-math.test.ts
+@@ -116,9 +116,9 @@ describe("netStrokesForHole", () => {
+ 
+ describe("computeHoleResult / summarizeRound / computeRound", () => {
+   const holes = [
+-    { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: 5 }, // H=10 -> 1 stroke -> net 4 -> 2pts
+-    { holeId: "h2", par: 3, strokeIndex: 15, grossStrokes: 3 }, // H=10, SI15>10 -> 0 strokes -> net 3 -> 2pts
+-    { holeId: "h3", par: 5, strokeIndex: 5, grossStrokes: 5 }, // H=10, SI5<=10 -> 1 stroke -> net 4 -> 3pts (birdie)
++    { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: 5, pickedUp: false }, // H=10 -> 1 stroke -> net 4 -> 2pts
++    { holeId: "h2", par: 3, strokeIndex: 15, grossStrokes: 3, pickedUp: false }, // H=10, SI15>10 -> 0 strokes -> net 3 -> 2pts
++    { holeId: "h3", par: 5, strokeIndex: 5, grossStrokes: 5, pickedUp: false }, // H=10, SI5<=10 -> 1 stroke -> net 4 -> 3pts (birdie)
+   ];
+ 
+   it("computes each hole correctly and sums to the round total", () => {
+@@ -132,6 +132,7 @@ describe("computeHoleResult / summarizeRound / computeRound", () => {
+       totalGrossStrokePlay: 13,
+       totalNetStrokePlay: 11,
+       totalStablefordPoints: 7,
++      holesPickedUp: 0,
+     });
+   });
+ 
+@@ -141,6 +142,65 @@ describe("computeHoleResult / summarizeRound / computeRound", () => {
+   });
+ });
+ 
++describe("picked-up (blob) holes", () => {
++  it("scores 0 points and has null gross/net strokes when picked up", () => {
++    const result = computeHoleResult(
++      { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: null, pickedUp: true },
++      10,
++      "full_18"
++    );
++    expect(result).toMatchObject({
++      grossStrokes: null,
++      netStrokes: null,
++      stablefordPoints: 0,
++      pickedUp: true,
++    });
++    // strokesReceived is still computed (harmless, just unused for scoring)
++    expect(result.strokesReceived).toBe(1);
++  });
++
++  it("throws if a hole is neither picked up nor has a gross score — a caller bug, not a valid state", () => {
++    expect(() =>
++      computeHoleResult(
++        { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: null, pickedUp: false },
++        10,
++        "full_18"
++      )
++    ).toThrow();
++  });
++
++  it("excludes picked-up holes from gross/net totals but still counts 0 Stableford points, and tracks the pick-up count", () => {
++    const holes = [
++      { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: 5, pickedUp: false }, // completed: 2pts (see fixture above)
++      { holeId: "h2", par: 3, strokeIndex: 15, grossStrokes: null, pickedUp: true }, // picked up: 0pts, no gross/net
++      { holeId: "h3", par: 5, strokeIndex: 5, grossStrokes: 5, pickedUp: false }, // completed: 3pts (birdie, see fixture above)
++    ];
++
++    const { summary } = computeRound(holes, 10, "full_18");
++
++    expect(summary).toEqual({
++      totalGrossStrokePlay: 10, // only h1 (5) + h3 (5), h2 excluded
++      totalNetStrokePlay: 8, // only h1 (4) + h3 (4), h2 excluded
++      totalStablefordPoints: 5, // h1 (2) + h2 (0) + h3 (3)
++      holesPickedUp: 1,
++    });
++  });
++
++  it("a round entirely of pick-ups scores 0 points and 0 totals with the pick-up count matching hole count", () => {
++    const holes = [
++      { holeId: "h1", par: 4, strokeIndex: 1, grossStrokes: null, pickedUp: true },
++      { holeId: "h2", par: 4, strokeIndex: 2, grossStrokes: null, pickedUp: true },
++    ];
++    const { summary } = computeRound(holes, 10, "full_18");
++    expect(summary).toEqual({
++      totalGrossStrokePlay: 0,
++      totalNetStrokePlay: 0,
++      totalStablefordPoints: 0,
++      holesPickedUp: 2,
++    });
++  });
++});
++
+ describe("targetStablefordPoints", () => {
+   it("is 36 for a full 18-hole round and 18 for a 9-hole round", () => {
+     expect(targetStablefordPoints("full_18")).toBe(36);
+diff --git a/lib/database.types.ts b/lib/database.types.ts
+index 264a6dc..7c74901 100644
+--- a/lib/database.types.ts
++++ b/lib/database.types.ts
+@@ -163,17 +163,19 @@ export interface Database {
+           id: string;
+           scorecard_id: string;
+           hole_id: string;
+-          gross_strokes: number;
+-          net_strokes: number;
++          gross_strokes: number | null;
++          net_strokes: number | null;
+           stableford_points: number;
++          picked_up: boolean;
+         };
+         Insert: {
+           id?: string;
+           scorecard_id: string;
+           hole_id: string;
+-          gross_strokes: number;
+-          net_strokes: number;
++          gross_strokes?: number | null;
++          net_strokes?: number | null;
+           stableford_points: number;
++          picked_up?: boolean;
+         };
+         Update: Partial<Database["public"]["Tables"]["scores"]["Insert"]>;
+         Relationships: [
+diff --git a/lib/golf-math.ts b/lib/golf-math.ts
+index ffccd80..6a3e792 100644
+--- a/lib/golf-math.ts
++++ b/lib/golf-math.ts
+@@ -90,24 +90,56 @@ export interface HoleInput {
+   holeId: string;
+   par: number;
+   strokeIndex: number;
+-  grossStrokes: number;
++  /** Null when pickedUp is true — a picked-up hole has no completed gross
++   * score by definition (the player stopped playing it early). */
++  grossStrokes: number | null;
++  /** True when the player picked up rather than holing out — the
++   * "blob" rule: once you can no longer score at least 1 Stableford
++   * point, pick up and take zero rather than finishing the hole. */
++  pickedUp: boolean;
+ }
+ 
+ export interface HoleResult {
+   holeId: string;
+-  grossStrokes: number;
++  grossStrokes: number | null;
+   strokesReceived: number;
+-  netStrokes: number;
++  netStrokes: number | null;
+   stablefordPoints: number;
++  pickedUp: boolean;
+ }
+ 
+-/** Computes the full per-hole breakdown for one hole of a round. */
++/** Computes the full per-hole breakdown for one hole of a round. A
++ * picked-up hole always scores 0 points and has no gross/net stroke
++ * count — there's nothing to compute beyond the strokes the player
++ * would have received, which isn't otherwise used but is harmless to
++ * include for consistency. */
+ export function computeHoleResult(
+   hole: HoleInput,
+   playingHandicap: number,
+   roundType: RoundType
+ ): HoleResult {
+   const strokesReceived = strokesReceivedOnHole(playingHandicap, hole.strokeIndex, roundType);
++
++  if (hole.pickedUp) {
++    return {
++      holeId: hole.holeId,
++      grossStrokes: null,
++      strokesReceived,
++      netStrokes: null,
++      stablefordPoints: 0,
++      pickedUp: true,
++    };
++  }
++
++  if (hole.grossStrokes === null) {
++    // A caller bug, not a user-facing state — the UI/server action should
++    // never construct a HoleInput that's neither picked up nor has a real
++    // gross score. Throwing loudly here beats silently computing nonsense.
++    throw new Error(
++      `Hole ${hole.holeId} has no gross strokes and isn't marked picked up — one or the other is required.`
++    );
++  }
++
+   const netStrokes = netStrokesForHole(hole.grossStrokes, strokesReceived);
+   const stablefordPoints = stablefordPointsForHole(netStrokes, hole.par);
+ 
+@@ -117,6 +149,7 @@ export function computeHoleResult(
+     strokesReceived,
+     netStrokes,
+     stablefordPoints,
++    pickedUp: false,
+   };
+ }
+ 
+@@ -124,17 +157,25 @@ export interface RoundSummary {
+   totalGrossStrokePlay: number;
+   totalNetStrokePlay: number;
+   totalStablefordPoints: number;
++  /** How many holes were picked up rather than completed — the gross/net
++   * totals above only ever sum the COMPLETED holes, so this is what tells
++   * the UI those totals are partial for a round with any pick-ups. */
++  holesPickedUp: number;
+ }
+ 
+-/** Sums a full set of per-hole results into the scorecard-level totals. */
++/** Sums a full set of per-hole results into the scorecard-level totals.
++ * Gross/net totals only include completed holes — a picked-up hole
++ * contributes 0 Stableford points but nothing to the stroke-play totals,
++ * since there's no real stroke count for a hole that wasn't finished. */
+ export function summarizeRound(holeResults: HoleResult[]): RoundSummary {
+   return holeResults.reduce<RoundSummary>(
+     (acc, h) => ({
+-      totalGrossStrokePlay: acc.totalGrossStrokePlay + h.grossStrokes,
+-      totalNetStrokePlay: acc.totalNetStrokePlay + h.netStrokes,
++      totalGrossStrokePlay: acc.totalGrossStrokePlay + (h.grossStrokes ?? 0),
++      totalNetStrokePlay: acc.totalNetStrokePlay + (h.netStrokes ?? 0),
+       totalStablefordPoints: acc.totalStablefordPoints + h.stablefordPoints,
++      holesPickedUp: acc.holesPickedUp + (h.pickedUp ? 1 : 0),
+     }),
+-    { totalGrossStrokePlay: 0, totalNetStrokePlay: 0, totalStablefordPoints: 0 }
++    { totalGrossStrokePlay: 0, totalNetStrokePlay: 0, totalStablefordPoints: 0, holesPickedUp: 0 }
+   );
+ }
+ 
+diff --git a/supabase/migrations/0013_add_picked_up_to_scores.sql b/supabase/migrations/0013_add_picked_up_to_scores.sql
+new file mode 100644
+index 0000000..91e67e9
+--- /dev/null
++++ b/supabase/migrations/0013_add_picked_up_to_scores.sql
+@@ -0,0 +1,28 @@
++-- 0013_add_picked_up_to_scores.sql
++--
++-- Supports the "pick up and blob" Stableford rule: once a player has taken
++-- enough strokes on a hole that they can no longer score at least 1 point,
++-- they pick up rather than holing out — speeding up play. That hole scores
++-- 0 Stableford points, and has no real gross/net stroke count (they didn't
++-- finish it), so those columns need to become optional rather than
++-- inventing a placeholder number that looks like a real completed score.
++
++alter table scores
++  add column picked_up boolean not null default false;
++
++alter table scores
++  alter column gross_strokes drop not null,
++  alter column net_strokes drop not null;
++
++-- A picked-up hole has no gross/net strokes and always scores 0. A
++-- completed hole must have both. This also means a round with any
++-- picked-up holes has an inherently PARTIAL total_gross_stroke_play /
++-- total_net_stroke_play on the parent scorecard — those totals only ever
++-- summed completed holes to begin with (see computeRound in
++-- lib/golf-math.ts), so no scorecards-table change is needed for that.
++alter table scores
++  add constraint scores_picked_up_consistency check (
++    (picked_up = true and gross_strokes is null and net_strokes is null and stableford_points = 0)
++    or
++    (picked_up = false and gross_strokes is not null and net_strokes is not null)
++  );

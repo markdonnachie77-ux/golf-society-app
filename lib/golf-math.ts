@@ -90,24 +90,56 @@ export interface HoleInput {
   holeId: string;
   par: number;
   strokeIndex: number;
-  grossStrokes: number;
+  /** Null when pickedUp is true — a picked-up hole has no completed gross
+   * score by definition (the player stopped playing it early). */
+  grossStrokes: number | null;
+  /** True when the player picked up rather than holing out — the
+   * "blob" rule: once you can no longer score at least 1 Stableford
+   * point, pick up and take zero rather than finishing the hole. */
+  pickedUp: boolean;
 }
 
 export interface HoleResult {
   holeId: string;
-  grossStrokes: number;
+  grossStrokes: number | null;
   strokesReceived: number;
-  netStrokes: number;
+  netStrokes: number | null;
   stablefordPoints: number;
+  pickedUp: boolean;
 }
 
-/** Computes the full per-hole breakdown for one hole of a round. */
+/** Computes the full per-hole breakdown for one hole of a round. A
+ * picked-up hole always scores 0 points and has no gross/net stroke
+ * count — there's nothing to compute beyond the strokes the player
+ * would have received, which isn't otherwise used but is harmless to
+ * include for consistency. */
 export function computeHoleResult(
   hole: HoleInput,
   playingHandicap: number,
   roundType: RoundType
 ): HoleResult {
   const strokesReceived = strokesReceivedOnHole(playingHandicap, hole.strokeIndex, roundType);
+
+  if (hole.pickedUp) {
+    return {
+      holeId: hole.holeId,
+      grossStrokes: null,
+      strokesReceived,
+      netStrokes: null,
+      stablefordPoints: 0,
+      pickedUp: true,
+    };
+  }
+
+  if (hole.grossStrokes === null) {
+    // A caller bug, not a user-facing state — the UI/server action should
+    // never construct a HoleInput that's neither picked up nor has a real
+    // gross score. Throwing loudly here beats silently computing nonsense.
+    throw new Error(
+      `Hole ${hole.holeId} has no gross strokes and isn't marked picked up — one or the other is required.`
+    );
+  }
+
   const netStrokes = netStrokesForHole(hole.grossStrokes, strokesReceived);
   const stablefordPoints = stablefordPointsForHole(netStrokes, hole.par);
 
@@ -117,6 +149,7 @@ export function computeHoleResult(
     strokesReceived,
     netStrokes,
     stablefordPoints,
+    pickedUp: false,
   };
 }
 
@@ -124,17 +157,25 @@ export interface RoundSummary {
   totalGrossStrokePlay: number;
   totalNetStrokePlay: number;
   totalStablefordPoints: number;
+  /** How many holes were picked up rather than completed — the gross/net
+   * totals above only ever sum the COMPLETED holes, so this is what tells
+   * the UI those totals are partial for a round with any pick-ups. */
+  holesPickedUp: number;
 }
 
-/** Sums a full set of per-hole results into the scorecard-level totals. */
+/** Sums a full set of per-hole results into the scorecard-level totals.
+ * Gross/net totals only include completed holes — a picked-up hole
+ * contributes 0 Stableford points but nothing to the stroke-play totals,
+ * since there's no real stroke count for a hole that wasn't finished. */
 export function summarizeRound(holeResults: HoleResult[]): RoundSummary {
   return holeResults.reduce<RoundSummary>(
     (acc, h) => ({
-      totalGrossStrokePlay: acc.totalGrossStrokePlay + h.grossStrokes,
-      totalNetStrokePlay: acc.totalNetStrokePlay + h.netStrokes,
+      totalGrossStrokePlay: acc.totalGrossStrokePlay + (h.grossStrokes ?? 0),
+      totalNetStrokePlay: acc.totalNetStrokePlay + (h.netStrokes ?? 0),
       totalStablefordPoints: acc.totalStablefordPoints + h.stablefordPoints,
+      holesPickedUp: acc.holesPickedUp + (h.pickedUp ? 1 : 0),
     }),
-    { totalGrossStrokePlay: 0, totalNetStrokePlay: 0, totalStablefordPoints: 0 }
+    { totalGrossStrokePlay: 0, totalNetStrokePlay: 0, totalStablefordPoints: 0, holesPickedUp: 0 }
   );
 }
 

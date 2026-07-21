@@ -13,9 +13,10 @@ import { BrandEyebrow } from "@/components/brand-eyebrow";
 interface ScoreRow {
   id: string;
   hole_id: string;
-  gross_strokes: number;
-  net_strokes: number;
+  gross_strokes: number | null;
+  net_strokes: number | null;
   stableford_points: number;
+  picked_up: boolean;
   holes: { hole_number: number; par: number; stroke_index: number } | null;
 }
 
@@ -34,6 +35,7 @@ export default async function ScorecardDetailPage({
 
   const { scorecard, course, scores, appliedChange } = result;
   const rows = scores as unknown as ScoreRow[];
+  const pickedUpCount = rows.filter((r) => r.picked_up).length;
 
   return (
     <main className="min-h-screen bg-background px-4 py-12">
@@ -79,6 +81,12 @@ export default async function ScorecardDetailPage({
               </div>
             </div>
 
+            {pickedUpCount > 0 && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Gross/Net totals exclude {pickedUpCount} picked-up hole{pickedUpCount === 1 ? "" : "s"}.
+              </p>
+            )}
+
             <p className="mt-4 text-sm text-muted-foreground">
               {scorecard.status === "pending_approval" &&
                 `Proposed handicap change (pending admin approval): ${
@@ -116,8 +124,16 @@ export default async function ScorecardDetailPage({
                 <span>{row.holes?.hole_number}</span>
                 <span className="text-muted-foreground">{row.holes?.par}</span>
                 <span className="text-muted-foreground">{row.holes?.stroke_index}</span>
-                <span>{row.gross_strokes}</span>
-                <span className="text-muted-foreground">{row.net_strokes}</span>
+                {row.picked_up ? (
+                  <span className="col-span-2 text-xs uppercase tracking-wide text-muted-foreground">
+                    Picked up
+                  </span>
+                ) : (
+                  <>
+                    <span>{row.gross_strokes}</span>
+                    <span className="text-muted-foreground">{row.net_strokes}</span>
+                  </>
+                )}
                 <span className="font-semibold">{row.stableford_points}</span>
               </div>
             </div>

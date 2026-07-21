@@ -162,6 +162,30 @@ assumptions the spec didn't pin down explicitly — both flagged with an
 - Stableford points flatten at 5 for anything better than an albatross
   (net −3), since the spec's table doesn't define a rate beyond that.
 
+## Picking up ("blobbing" a hole)
+
+Not in the original spec — added as a society rule to speed up play: once a
+player can no longer score at least 1 Stableford point on a hole, they can
+pick up rather than finishing it. That hole scores 0 points and has no real
+gross/net stroke count.
+
+Worth knowing:
+- **`total_gross_stroke_play` / `total_net_stroke_play` only ever sum
+  completed holes.** A round with any picked-up holes has an inherently
+  partial gross/net total — the UI shows a note when this applies
+  (`/rounds/new`'s live preview and `/rounds/[id]`'s result card), but if
+  you ever query these columns directly, don't assume they represent a
+  full round's stroke play.
+- The `scores` table enforces this at the database level: a row is either
+  `picked_up = true` with null gross/net strokes and 0 points, or
+  `picked_up = false` with all three populated — see the CHECK constraint
+  in `supabase/migrations/0013_add_picked_up_to_scores.sql`.
+- This is entirely self-reported, same as gross scores — there's no
+  validation preventing someone from picking up "too early" (e.g. after
+  only 2 strokes on a par 4). Golf societies run on the honor system for
+  self-scoring generally, and this follows the same trust model rather
+  than trying to enforce the rule server-side.
+
 ## A deliberate access-control change (Phase 7)
 
 Through Phase 5 and 6, `/rounds/[id]` was viewable only by the scorecard's
