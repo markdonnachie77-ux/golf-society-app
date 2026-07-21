@@ -14,9 +14,10 @@ interface PlayerSelectProps {
   players: Player[];
   value: string | null;
   onChange: (playerId: string) => void;
+  placeholder?: string;
 }
 
-export function PlayerSelect({ players, value, onChange }: PlayerSelectProps) {
+export function PlayerSelect({ players, value, onChange, placeholder = "Find your name…" }: PlayerSelectProps) {
   const [query, setQuery] = React.useState("");
   const [open, setOpen] = React.useState(false);
 
@@ -41,7 +42,7 @@ export function PlayerSelect({ players, value, onChange }: PlayerSelectProps) {
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
-          placeholder="Find your name…"
+          placeholder={placeholder}
           className="flex h-10 w-full rounded-md border border-input bg-card pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>

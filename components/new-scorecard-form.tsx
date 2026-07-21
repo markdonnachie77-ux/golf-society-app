@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { TeeColorToggle } from "@/components/tee-color-toggle";
 import { RoundTypeToggle } from "@/components/round-type-toggle";
+import { PlayerSelect } from "@/components/player-select";
 import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
 import { allowedRoundTypes } from "@/lib/round-setup";
 import { getHolesForRound, createScorecard } from "@/app/actions/scorecards";
@@ -19,6 +20,13 @@ interface Course {
   hole_count: 9 | 18;
   handicap_cut_per_point: number;
   handicap_increase_per_point: number;
+}
+
+interface PlayerOption {
+  id: string;
+  first_name: string;
+  last_name: string;
+  current_handicap: number;
 }
 
 interface HoleRow {
@@ -35,13 +43,20 @@ function todayIsoDate(): string {
 export function NewScorecardForm({
   courses,
   defaultHandicap,
+  viewerPlayerId,
+  isAdmin = false,
+  allPlayers = [],
 }: {
   courses: Course[];
   defaultHandicap: number;
+  viewerPlayerId: string;
+  isAdmin?: boolean;
+  allPlayers?: PlayerOption[];
 }) {
   const [courseId, setCourseId] = React.useState<string | null>(
     courses.length === 1 ? courses[0].id : null
   );
+  const [onBehalfOfPlayerId, setOnBehalfOfPlayerId] = React.useState<string>(viewerPlayerId);
   const [teeColor, setTeeColor] = React.useState<"white" | "yellow">("white");
   const [roundType, setRoundType] = React.useState<RoundType | null>(null);
   const [playedAt, setPlayedAt] = React.useState(todayIsoDate());
@@ -52,6 +67,17 @@ export function NewScorecardForm({
   const [pickedUpByHole, setPickedUpByHole] = React.useState<Record<string, boolean>>({});
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
+
+  /** When an admin switches who they're logging for, default the playing
+   * handicap to THAT player's current handicap rather than leaving
+   * whatever was there before (still editable either way). */
+  function handleOnBehalfOfChange(playerId: string) {
+    setOnBehalfOfPlayerId(playerId);
+    const target = allPlayers.find((p) => p.id === playerId);
+    if (target) {
+      setPlayingHandicap(String(target.current_handicap));
+    }
+  }
 
   const selectedCourse = courses.find((c) => c.id === courseId) ?? null;
   const roundTypeOptions = selectedCourse ? allowedRoundTypes(selectedCourse.hole_count) : [];
@@ -139,6 +165,7 @@ export function NewScorecardForm({
     setPending(true);
     const formData = new FormData();
     formData.set("courseId", courseId);
+    formData.set("onBehalfOfPlayerId", onBehalfOfPlayerId);
     formData.set("teeColor", teeColor);
     formData.set("roundType", roundType);
     formData.set("playedAt", playedAt);
@@ -172,6 +199,24 @@ export function NewScorecardForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-8">
+      {isAdmin && (
+        <div className="space-y-1.5">
+          <Label>Log this round for</Label>
+          <PlayerSelect
+            players={allPlayers}
+            value={onBehalfOfPlayerId}
+            onChange={handleOnBehalfOfChange}
+            placeholder="Find a player…"
+          />
+          {onBehalfOfPlayerId !== viewerPlayerId && (
+            <p className="text-xs text-muted-foreground">
+              Logging on behalf of another member — playing handicap defaulted to their current
+              handicap, still editable below.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="space-y-1.5">
         <Label>Course</Label>
         <div className="flex flex-col gap-2">

@@ -60,6 +60,24 @@ const submitSchema = z.object({
 export async function createScorecard(formData: FormData): Promise<ActionResult> {
   const session = await requireSession();
 
+  // Admins can log a round on behalf of another player (e.g. a member
+  // without a phone handy, or entering a paper scorecard). Everyone else
+  // can only ever submit for themselves — this is enforced here, not just
+  // hidden in the UI, so a non-admin can't submit a crafted request to
+  // attribute a round to someone else.
+  const onBehalfRaw = String(formData.get("onBehalfOfPlayerId") ?? "").trim();
+  let targetPlayerId = session.playerId;
+
+  if (onBehalfRaw && onBehalfRaw !== session.playerId) {
+    if (session.role !== "admin") {
+      return { ok: false, error: "Only admins can log a round on behalf of another player." };
+    }
+    if (!z.string().uuid().safeParse(onBehalfRaw).success) {
+      return { ok: false, error: "Invalid player selected." };
+    }
+    targetPlayerId = onBehalfRaw;
+  }
+
   const parsed = submitSchema.safeParse({
     courseId: String(formData.get("courseId") ?? ""),
     teeColor: String(formData.get("teeColor") ?? ""),
@@ -150,7 +168,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   const { data: scorecard, error: scorecardError } = await supabase
     .from("scorecards")
     .insert({
-      player_id: session.playerId,
+      player_id: targetPlayerId,
       course_id: courseId,
       tee_color: teeColor,
       round_type: roundType,

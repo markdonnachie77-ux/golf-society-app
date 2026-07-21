@@ -162,6 +162,25 @@ assumptions the spec didn't pin down explicitly — both flagged with an
 - Stableford points flatten at 5 for anything better than an albatross
   (net −3), since the spec's table doesn't define a rate beyond that.
 
+## Admins logging a round on behalf of a player
+
+`/rounds/new` shows an extra "Log this round for" picker, admin-only —
+useful for a member without a phone handy, or entering a paper scorecard
+after the fact. It defaults to the admin's own name; picking someone else
+also defaults the playing handicap field to that player's current
+handicap (still editable).
+
+This is enforced server-side, not just hidden in the UI: `createScorecard`
+only honors a different target player when the session's role is actually
+`admin` — a non-admin submitting a crafted request with someone else's
+player id gets rejected outright, not silently ignored.
+
+One thing NOT built: there's no record of *who* actually submitted a round
+when an admin logs it for someone else — `scorecards.player_id` is who the
+round is for, same as always, with no separate "logged by" column. If you
+want that audit trail (e.g. "logged by admin X on behalf of Y"), it's a
+small schema addition, just not something the request asked for.
+
 ## Picking up ("blobbing" a hole)
 
 Not in the original spec — added as a society rule to speed up play: once a

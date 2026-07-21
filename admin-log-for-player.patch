@@ -1,0 +1,229 @@
+diff --git a/README.md b/README.md
+index e93182a..6dc33fc 100644
+--- a/README.md
++++ b/README.md
+@@ -162,6 +162,25 @@ assumptions the spec didn't pin down explicitly — both flagged with an
+ - Stableford points flatten at 5 for anything better than an albatross
+   (net −3), since the spec's table doesn't define a rate beyond that.
+ 
++## Admins logging a round on behalf of a player
++
++`/rounds/new` shows an extra "Log this round for" picker, admin-only —
++useful for a member without a phone handy, or entering a paper scorecard
++after the fact. It defaults to the admin's own name; picking someone else
++also defaults the playing handicap field to that player's current
++handicap (still editable).
++
++This is enforced server-side, not just hidden in the UI: `createScorecard`
++only honors a different target player when the session's role is actually
++`admin` — a non-admin submitting a crafted request with someone else's
++player id gets rejected outright, not silently ignored.
++
++One thing NOT built: there's no record of *who* actually submitted a round
++when an admin logs it for someone else — `scorecards.player_id` is who the
++round is for, same as always, with no separate "logged by" column. If you
++want that audit trail (e.g. "logged by admin X on behalf of Y"), it's a
++small schema addition, just not something the request asked for.
++
+ ## Picking up ("blobbing" a hole)
+ 
+ Not in the original spec — added as a society rule to speed up play: once a
+diff --git a/app/actions/scorecards.ts b/app/actions/scorecards.ts
+index ee9e4ef..6b2aed9 100644
+--- a/app/actions/scorecards.ts
++++ b/app/actions/scorecards.ts
+@@ -60,6 +60,24 @@ const submitSchema = z.object({
+ export async function createScorecard(formData: FormData): Promise<ActionResult> {
+   const session = await requireSession();
+ 
++  // Admins can log a round on behalf of another player (e.g. a member
++  // without a phone handy, or entering a paper scorecard). Everyone else
++  // can only ever submit for themselves — this is enforced here, not just
++  // hidden in the UI, so a non-admin can't submit a crafted request to
++  // attribute a round to someone else.
++  const onBehalfRaw = String(formData.get("onBehalfOfPlayerId") ?? "").trim();
++  let targetPlayerId = session.playerId;
++
++  if (onBehalfRaw && onBehalfRaw !== session.playerId) {
++    if (session.role !== "admin") {
++      return { ok: false, error: "Only admins can log a round on behalf of another player." };
++    }
++    if (!z.string().uuid().safeParse(onBehalfRaw).success) {
++      return { ok: false, error: "Invalid player selected." };
++    }
++    targetPlayerId = onBehalfRaw;
++  }
++
+   const parsed = submitSchema.safeParse({
+     courseId: String(formData.get("courseId") ?? ""),
+     teeColor: String(formData.get("teeColor") ?? ""),
+@@ -150,7 +168,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
+   const { data: scorecard, error: scorecardError } = await supabase
+     .from("scorecards")
+     .insert({
+-      player_id: session.playerId,
++      player_id: targetPlayerId,
+       course_id: courseId,
+       tee_color: teeColor,
+       round_type: roundType,
+diff --git a/app/rounds/new/page.tsx b/app/rounds/new/page.tsx
+index b9f1b3c..c0b5b1e 100644
+--- a/app/rounds/new/page.tsx
++++ b/app/rounds/new/page.tsx
+@@ -1,6 +1,7 @@
+ import { requireSession } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
+ import { listCoursesForRound } from "@/app/actions/scorecards";
++import { listAllPlayers } from "@/app/actions/players";
+ import { NewScorecardForm } from "@/components/new-scorecard-form";
+ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+ import { BrandEyebrow } from "@/components/brand-eyebrow";
+@@ -8,10 +9,14 @@ import { BrandEyebrow } from "@/components/brand-eyebrow";
+ export default async function NewRoundPage() {
+   const session = await requireSession();
+   const supabase = createServiceClient();
++  const isAdmin = session.role === "admin";
+ 
+-  const [courses, { data: player }] = await Promise.all([
++  const [courses, { data: player }, allPlayers] = await Promise.all([
+     listCoursesForRound(),
+     supabase.from("players").select("current_handicap").eq("id", session.playerId).single(),
++    // Only admins get the "log on behalf of" picker, so don't bother
++    // fetching the whole player directory for everyone else.
++    isAdmin ? listAllPlayers() : Promise.resolve([]),
+   ]);
+ 
+   return (
+@@ -33,6 +38,9 @@ export default async function NewRoundPage() {
+             <NewScorecardForm
+               courses={courses}
+               defaultHandicap={player?.current_handicap ?? 0}
++              viewerPlayerId={session.playerId}
++              isAdmin={isAdmin}
++              allPlayers={allPlayers}
+             />
+           </CardContent>
+         </Card>
+diff --git a/components/new-scorecard-form.tsx b/components/new-scorecard-form.tsx
+index ef7546f..39dd9a2 100644
+--- a/components/new-scorecard-form.tsx
++++ b/components/new-scorecard-form.tsx
+@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
+ import { Button } from "@/components/ui/button";
+ import { TeeColorToggle } from "@/components/tee-color-toggle";
+ import { RoundTypeToggle } from "@/components/round-type-toggle";
++import { PlayerSelect } from "@/components/player-select";
+ import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
+ import { allowedRoundTypes } from "@/lib/round-setup";
+ import { getHolesForRound, createScorecard } from "@/app/actions/scorecards";
+@@ -21,6 +22,13 @@ interface Course {
+   handicap_increase_per_point: number;
+ }
+ 
++interface PlayerOption {
++  id: string;
++  first_name: string;
++  last_name: string;
++  current_handicap: number;
++}
++
+ interface HoleRow {
+   id: string;
+   hole_number: number;
+@@ -35,13 +43,20 @@ function todayIsoDate(): string {
+ export function NewScorecardForm({
+   courses,
+   defaultHandicap,
++  viewerPlayerId,
++  isAdmin = false,
++  allPlayers = [],
+ }: {
+   courses: Course[];
+   defaultHandicap: number;
++  viewerPlayerId: string;
++  isAdmin?: boolean;
++  allPlayers?: PlayerOption[];
+ }) {
+   const [courseId, setCourseId] = React.useState<string | null>(
+     courses.length === 1 ? courses[0].id : null
+   );
++  const [onBehalfOfPlayerId, setOnBehalfOfPlayerId] = React.useState<string>(viewerPlayerId);
+   const [teeColor, setTeeColor] = React.useState<"white" | "yellow">("white");
+   const [roundType, setRoundType] = React.useState<RoundType | null>(null);
+   const [playedAt, setPlayedAt] = React.useState(todayIsoDate());
+@@ -53,6 +68,17 @@ export function NewScorecardForm({
+   const [error, setError] = React.useState<string | null>(null);
+   const [pending, setPending] = React.useState(false);
+ 
++  /** When an admin switches who they're logging for, default the playing
++   * handicap to THAT player's current handicap rather than leaving
++   * whatever was there before (still editable either way). */
++  function handleOnBehalfOfChange(playerId: string) {
++    setOnBehalfOfPlayerId(playerId);
++    const target = allPlayers.find((p) => p.id === playerId);
++    if (target) {
++      setPlayingHandicap(String(target.current_handicap));
++    }
++  }
++
+   const selectedCourse = courses.find((c) => c.id === courseId) ?? null;
+   const roundTypeOptions = selectedCourse ? allowedRoundTypes(selectedCourse.hole_count) : [];
+ 
+@@ -139,6 +165,7 @@ export function NewScorecardForm({
+     setPending(true);
+     const formData = new FormData();
+     formData.set("courseId", courseId);
++    formData.set("onBehalfOfPlayerId", onBehalfOfPlayerId);
+     formData.set("teeColor", teeColor);
+     formData.set("roundType", roundType);
+     formData.set("playedAt", playedAt);
+@@ -172,6 +199,24 @@ export function NewScorecardForm({
+ 
+   return (
+     <form onSubmit={handleSubmit} className="flex flex-col gap-8">
++      {isAdmin && (
++        <div className="space-y-1.5">
++          <Label>Log this round for</Label>
++          <PlayerSelect
++            players={allPlayers}
++            value={onBehalfOfPlayerId}
++            onChange={handleOnBehalfOfChange}
++            placeholder="Find a player…"
++          />
++          {onBehalfOfPlayerId !== viewerPlayerId && (
++            <p className="text-xs text-muted-foreground">
++              Logging on behalf of another member — playing handicap defaulted to their current
++              handicap, still editable below.
++            </p>
++          )}
++        </div>
++      )}
++
+       <div className="space-y-1.5">
+         <Label>Course</Label>
+         <div className="flex flex-col gap-2">
+diff --git a/components/player-select.tsx b/components/player-select.tsx
+index fcd216a..124294c 100644
+--- a/components/player-select.tsx
++++ b/components/player-select.tsx
+@@ -14,9 +14,10 @@ interface PlayerSelectProps {
+   players: Player[];
+   value: string | null;
+   onChange: (playerId: string) => void;
++  placeholder?: string;
+ }
+ 
+-export function PlayerSelect({ players, value, onChange }: PlayerSelectProps) {
++export function PlayerSelect({ players, value, onChange, placeholder = "Find your name…" }: PlayerSelectProps) {
+   const [query, setQuery] = React.useState("");
+   const [open, setOpen] = React.useState(false);
+ 
+@@ -41,7 +42,7 @@ export function PlayerSelect({ players, value, onChange }: PlayerSelectProps) {
+             setOpen(true);
+           }}
+           onFocus={() => setOpen(true)}
+-          placeholder="Find your name…"
++          placeholder={placeholder}
+           className="flex h-10 w-full rounded-md border border-input bg-card pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+         />
+       </div>
