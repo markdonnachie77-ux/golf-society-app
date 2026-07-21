@@ -389,6 +389,52 @@ nothing is "correct by accident" and every query stands on its own.
   — courses, rounds, approvals, players — genuinely shows only its own
   tenant's data when visited via that tenant's `*.localhost` subdomain.
 
+## Per-society login page photo
+
+`/admin/settings` also has an upload panel for the login/register hero
+photo — the first thing in this app to use Supabase Storage (previously
+disabled entirely; see `supabase/config.toml`). Stored as a plain setting
+(`hero_photo_url`) in the same `app_settings` key/value table every other
+setting lives in, rather than a new column — exactly the extensibility
+the settings design was built for.
+
+**A society with no uploaded photo gets a clean, photo-less hero panel**
+(just the fairway-green background and name), not a fallback to any other
+society's image — showing one society's actual members as another's
+default branding would be a strange first impression for a brand-new
+tenant. EVS is the one exception, and only because it already had a real
+photo before this feature existed: `0016_hero_photo_storage.sql` seeds
+EVS's `hero_photo_url` setting to point at the pre-existing static asset,
+so their login page looks exactly the same as before, with no action
+needed on their part.
+
+Technical notes:
+- Uploads go through the service-role client, same as every other write
+  in this app — the storage bucket (`society-photos`) is marked public
+  for *reads* (so a logged-out visitor can see the photo on the login
+  page without a signed URL), but writes only ever happen server-side.
+- The hero panel's frame uses a generic `aspect-[3/2]` ratio with
+  `object-contain`, not EVS's original photo's exact dimensions — since
+  this now needs to handle arbitrary uploaded photos of unknown
+  proportions, guaranteeing nothing gets cropped (letterboxing instead)
+  matters more than a pixel-perfect frame for one specific image.
+- `next.config.mjs`'s `images.remotePatterns` is derived from
+  `SUPABASE_URL` at config-load time, so it automatically covers both the
+  local Docker stack and the hosted production project without a
+  separate value to keep in sync.
+- 5MB max, PNG/JPEG/WebP only, validated both client-side (immediate
+  feedback) and server-side (the real enforcement — never trust the
+  client-side check alone).
+
+One thing I can't fully verify without a real `next build` (no network
+access in the environment I develop in): the Supabase Storage client
+calls (`.storage.from(...).upload()` / `.getPublicUrl()`) aren't part of
+the hand-written `Database` generic type that's caused build surprises
+elsewhere in this codebase — they're plain methods on the base client,
+unrelated to table typing — so I don't expect the same class of issue,
+but it's worth knowing I'm reasoning from how the library is documented
+to behave here, not from having compiled it.
+
 ## Application settings (`/admin/settings`)
 
 A general, extensible settings store — `app_settings` is a plain

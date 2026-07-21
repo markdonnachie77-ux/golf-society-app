@@ -1,12 +1,15 @@
 import { RegisterForm } from "@/components/register-form";
+import { getAppSettings } from "@/app/actions/settings";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 import { AuthHeroPhoto } from "@/components/auth-hero-photo";
 
-export default function RegisterPage() {
+export default async function RegisterPage() {
+  const settings = await getAppSettings();
+
   return (
     <main className="flex min-h-screen">
-      <AuthHeroPhoto />
+      <AuthHeroPhoto photoUrl={settings.heroPhotoUrl} />
       <div className="flex flex-1 items-center justify-center bg-background px-4 py-12">
         <div className="w-full max-w-sm">
           <div className="mb-8 text-center">

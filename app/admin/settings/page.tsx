@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/auth";
 import { getAppSettings } from "@/app/actions/settings";
 import { SettingToggle } from "@/components/admin-setting-toggle";
+import { AdminHeroPhotoSetting } from "@/components/admin-hero-photo-setting";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function AdminSettingsPage() {
@@ -25,6 +26,8 @@ export default async function AdminSettingsPage() {
             description="Turn off to require every round to go through an admin instead — self-submitted scores stay off, admins can still log a round on behalf of any player."
             initialValue={settings.playersCanLogOwnRounds}
           />
+          <div className="ledger-rule" />
+          <AdminHeroPhotoSetting currentPhotoUrl={settings.heroPhotoUrl} />
         </div>
       </div>
     </main>
