@@ -1,7 +1,8 @@
 "use server";
 
-import { requireSession } from "@/lib/auth";
+import { requireSession, requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
+import type { ActionResult } from "@/app/actions/auth";
 
 export interface PlayerListRow {
   id: string;
@@ -92,4 +93,37 @@ export async function getPlayerProfile(playerId: string) {
   });
 
   return { player, history, recentRounds };
+}
+
+export async function adjustPlayerHandicap(
+  playerId: string,
+  newHandicap: number,
+  notes: string
+): Promise<ActionResult> {
+  const session = await requireAdmin();
+
+  if (Number.isNaN(newHandicap)) {
+    return { ok: false, error: "Enter a valid handicap." };
+  }
+  if (newHandicap < -10 || newHandicap > 54) {
+    return { ok: false, error: "That handicap looks out of range (-10 to 54)." };
+  }
+
+  const supabase = createServiceClient();
+
+  // Cast bypasses TypeScript's .rpc() argument-shape check — see the
+  // identical comment in app/actions/approvals.ts's approveScorecard for
+  // why. No effect at runtime.
+  const { error } = await (supabase.rpc as any)("manual_handicap_adjustment", {
+    p_player_id: playerId,
+    p_new_handicap: newHandicap,
+    p_admin_id: session.playerId,
+    p_notes: notes,
+  });
+
+  if (error) {
+    return { ok: false, error: error.message || "Could not update this player's handicap." };
+  }
+
+  return { ok: true };
 }

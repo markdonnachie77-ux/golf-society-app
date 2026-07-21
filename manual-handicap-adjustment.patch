@@ -1,0 +1,268 @@
+diff --git a/app/actions/players.ts b/app/actions/players.ts
+index 0b39a09..3e1c693 100644
+--- a/app/actions/players.ts
++++ b/app/actions/players.ts
+@@ -1,7 +1,8 @@
+ "use server";
+ 
+-import { requireSession } from "@/lib/auth";
++import { requireSession, requireAdmin } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
++import type { ActionResult } from "@/app/actions/auth";
+ 
+ export interface PlayerListRow {
+   id: string;
+@@ -93,3 +94,36 @@ export async function getPlayerProfile(playerId: string) {
+ 
+   return { player, history, recentRounds };
+ }
++
++export async function adjustPlayerHandicap(
++  playerId: string,
++  newHandicap: number,
++  notes: string
++): Promise<ActionResult> {
++  const session = await requireAdmin();
++
++  if (Number.isNaN(newHandicap)) {
++    return { ok: false, error: "Enter a valid handicap." };
++  }
++  if (newHandicap < -10 || newHandicap > 54) {
++    return { ok: false, error: "That handicap looks out of range (-10 to 54)." };
++  }
++
++  const supabase = createServiceClient();
++
++  // Cast bypasses TypeScript's .rpc() argument-shape check — see the
++  // identical comment in app/actions/approvals.ts's approveScorecard for
++  // why. No effect at runtime.
++  const { error } = await (supabase.rpc as any)("manual_handicap_adjustment", {
++    p_player_id: playerId,
++    p_new_handicap: newHandicap,
++    p_admin_id: session.playerId,
++    p_notes: notes,
++  });
++
++  if (error) {
++    return { ok: false, error: error.message || "Could not update this player's handicap." };
++  }
++
++  return { ok: true };
++}
+diff --git a/app/players/[id]/page.tsx b/app/players/[id]/page.tsx
+index 1040130..5c44462 100644
+--- a/app/players/[id]/page.tsx
++++ b/app/players/[id]/page.tsx
+@@ -1,7 +1,9 @@
+ import { notFound } from "next/navigation";
+ import Link from "next/link";
++import { requireSession } from "@/lib/auth";
+ import { getPlayerProfile } from "@/app/actions/players";
+ import { HandicapTimelineChart } from "@/components/handicap-timeline-chart";
++import { AdminHandicapPanel } from "@/components/admin-handicap-panel";
+ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+ import { cn } from "@/lib/utils";
+ import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
+@@ -13,6 +15,7 @@ export default async function PlayerProfilePage({
+   params: Promise<{ id: string }>;
+ }) {
+   const { id } = await params;
++  const session = await requireSession();
+   const result = await getPlayerProfile(id);
+ 
+   if (!result) {
+@@ -53,6 +56,12 @@ export default async function PlayerProfilePage({
+           </CardContent>
+         </Card>
+ 
++        {session.role === "admin" && (
++          <div className="mt-4">
++            <AdminHandicapPanel playerId={player.id} currentHandicap={player.current_handicap} />
++          </div>
++        )}
++
+         <div className="mt-6">
+           <h2 className="font-display mb-3 text-lg font-semibold">Recent rounds</h2>
+           {recentRounds.length === 0 ? (
+diff --git a/components/admin-handicap-panel.tsx b/components/admin-handicap-panel.tsx
+new file mode 100644
+index 0000000..f413197
+--- /dev/null
++++ b/components/admin-handicap-panel.tsx
+@@ -0,0 +1,115 @@
++"use client";
++
++import * as React from "react";
++import { useRouter } from "next/navigation";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { Label } from "@/components/ui/label";
++import { adjustPlayerHandicap } from "@/app/actions/players";
++
++export function AdminHandicapPanel({
++  playerId,
++  currentHandicap,
++}: {
++  playerId: string;
++  currentHandicap: number;
++}) {
++  const router = useRouter();
++  const [open, setOpen] = React.useState(false);
++  const [newHandicap, setNewHandicap] = React.useState(String(currentHandicap));
++  const [notes, setNotes] = React.useState("");
++  const [error, setError] = React.useState<string | null>(null);
++  const [pending, setPending] = React.useState(false);
++
++  const parsedValue = Number(newHandicap);
++  const delta = Number.isNaN(parsedValue) ? null : Math.round((parsedValue - currentHandicap) * 10) / 10;
++
++  async function handleSubmit(e: React.FormEvent) {
++    e.preventDefault();
++    setError(null);
++
++    if (Number.isNaN(parsedValue)) {
++      setError("Enter a valid number.");
++      return;
++    }
++
++    setPending(true);
++    const result = await adjustPlayerHandicap(playerId, parsedValue, notes.trim());
++    if (!result.ok) {
++      setError(result.error ?? "Something went wrong.");
++      setPending(false);
++      return;
++    }
++
++    setPending(false);
++    setOpen(false);
++    setNotes("");
++    router.refresh();
++  }
++
++  if (!open) {
++    return (
++      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
++        Adjust handicap
++      </Button>
++    );
++  }
++
++  return (
++    <form
++      onSubmit={handleSubmit}
++      className="rounded-lg border border-accent/40 bg-accent/5 p-5"
++    >
++      <p className="text-xs uppercase tracking-widest text-accent">Manual adjustment (admin)</p>
++
++      <div className="mt-4 flex flex-wrap items-end gap-4">
++        <div className="space-y-1.5">
++          <Label htmlFor="newHandicap">New handicap</Label>
++          <Input
++            id="newHandicap"
++            type="number"
++            step="0.1"
++            value={newHandicap}
++            onChange={(e) => setNewHandicap(e.target.value)}
++            disabled={pending}
++            className="font-numeral w-28"
++          />
++        </div>
++        <p className="pb-2 font-numeral text-sm text-muted-foreground">
++          {delta !== null && (delta > 0 ? "+" : "") + delta} from current {currentHandicap}
++        </p>
++      </div>
++
++      <div className="mt-4 space-y-1.5">
++        <Label htmlFor="notes">Reason (optional, but shown in their handicap history)</Label>
++        <Input
++          id="notes"
++          value={notes}
++          onChange={(e) => setNotes(e.target.value)}
++          placeholder="e.g. correcting migration from old system"
++          disabled={pending}
++        />
++      </div>
++
++      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
++
++      <div className="mt-5 flex gap-3">
++        <Button type="submit" variant="accent" disabled={pending}>
++          {pending ? "Saving…" : "Save"}
++        </Button>
++        <Button
++          type="button"
++          variant="ghost"
++          disabled={pending}
++          onClick={() => {
++            setOpen(false);
++            setError(null);
++            setNewHandicap(String(currentHandicap));
++          }}
++        >
++          Cancel
++        </Button>
++      </div>
++    </form>
++  );
++}
+diff --git a/supabase/migrations/0009_manual_handicap_adjustment.sql b/supabase/migrations/0009_manual_handicap_adjustment.sql
+new file mode 100644
+index 0000000..830a51a
+--- /dev/null
++++ b/supabase/migrations/0009_manual_handicap_adjustment.sql
+@@ -0,0 +1,55 @@
++-- 0009_manual_handicap_adjustment.sql
++--
++-- Lets an admin set a player's handicap directly, independent of the
++-- round-approval workflow — e.g. correcting a migration error from another
++-- system, or a society committee decision outside of a specific round.
++-- handicap_history.scorecard_id has been nullable since Phase 1
++-- specifically for this case ("linked if changed by round" implies it's
++-- optional when the change ISN'T from a round); this is the first thing
++-- that actually inserts a null-scorecard_id row.
++--
++-- Same atomicity reasoning as approve_scorecard/reject_scorecard in
++-- 0008_approval_functions.sql: updating players.current_handicap and
++-- inserting the handicap_history row must succeed or fail together.
++
++create or replace function manual_handicap_adjustment(
++  p_player_id uuid,
++  p_new_handicap numeric,
++  p_admin_id uuid,
++  p_notes text
++)
++returns table (adjustment_amount numeric) as $$
++declare
++  v_current_handicap numeric;
++  v_adjustment numeric;
++  v_new_handicap numeric;
++  v_notes text;
++begin
++  select current_handicap into v_current_handicap
++  from players
++  where id = p_player_id
++  for update;
++
++  if v_current_handicap is null then
++    raise exception 'Player % not found', p_player_id;
++  end if;
++
++  v_new_handicap := round(p_new_handicap::numeric, 1);
++  v_adjustment := round((v_new_handicap - v_current_handicap)::numeric, 1);
++  v_notes := coalesce(nullif(trim(p_notes), ''), 'Manual adjustment by admin');
++
++  update players
++  set current_handicap = v_new_handicap
++  where id = p_player_id;
++
++  insert into handicap_history (player_id, scorecard_id, handicap_value, adjustment_amount, effective_date, notes)
++  values (p_player_id, null, v_new_handicap, v_adjustment, now(), v_notes);
++
++  return query select v_adjustment;
++end;
++$$ language plpgsql;
++
++-- Same reasoning as 0008: Postgres grants EXECUTE to PUBLIC by default on
++-- new functions, and only the service role (server-side only) should ever
++-- call this.
++revoke execute on function manual_handicap_adjustment(uuid, numeric, uuid, text) from public;

@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { requireSession } from "@/lib/auth";
 import { getPlayerProfile } from "@/app/actions/players";
 import { HandicapTimelineChart } from "@/components/handicap-timeline-chart";
+import { AdminHandicapPanel } from "@/components/admin-handicap-panel";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
@@ -13,6 +15,7 @@ export default async function PlayerProfilePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const session = await requireSession();
   const result = await getPlayerProfile(id);
 
   if (!result) {
@@ -52,6 +55,12 @@ export default async function PlayerProfilePage({
             />
           </CardContent>
         </Card>
+
+        {session.role === "admin" && (
+          <div className="mt-4">
+            <AdminHandicapPanel playerId={player.id} currentHandicap={player.current_handicap} />
+          </div>
+        )}
 
         <div className="mt-6">
           <h2 className="font-display mb-3 text-lg font-semibold">Recent rounds</h2>
