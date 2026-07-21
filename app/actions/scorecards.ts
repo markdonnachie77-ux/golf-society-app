@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { redirect } from "next/navigation";
-import { requireSession } from "@/lib/auth";
+import { requireSession, requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
 import { filterHolesForRoundType } from "@/lib/round-setup";
@@ -306,4 +306,24 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
       course_name: course?.name ?? "Unknown course",
     };
   });
+}
+
+// ---------- Deletion (admin only) ----------
+
+export async function deleteRound(scorecardId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const supabase = createServiceClient();
+
+  // Cast bypasses TypeScript's .rpc() argument-shape check — see the
+  // identical comment in app/actions/approvals.ts's approveScorecard for
+  // why. No effect at runtime.
+  const { error } = await (supabase.rpc as any)("delete_round", {
+    p_scorecard_id: scorecardId,
+  });
+
+  if (error) {
+    return { ok: false, error: error.message || "Could not delete this round." };
+  }
+
+  return { ok: true };
 }

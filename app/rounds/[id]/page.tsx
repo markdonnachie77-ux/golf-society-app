@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireSession } from "@/lib/auth";
 import { getScorecardDetail } from "@/app/actions/scorecards";
 import { AdminApprovalPanel } from "@/components/admin-approval-panel";
+import { AdminDeleteRoundPanel } from "@/components/admin-delete-round-panel";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -122,6 +123,12 @@ export default async function ScorecardDetailPage({
             </div>
           ))}
         </div>
+
+        {session.role === "admin" && (
+          <div className="mt-6">
+            <AdminDeleteRoundPanel scorecardId={scorecard.id} status={scorecard.status} />
+          </div>
+        )}
 
         <div className="mt-6 flex gap-3">
           <Button asChild variant="outline">
