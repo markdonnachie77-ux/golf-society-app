@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Fairway-green circle backdrop, matching the palette already used
+       in components/handicap-timeline-chart.tsx (FAIRWAY_GREEN/BRASS) -->
+  <circle cx="16" cy="16" r="15" fill="#2c5f47" />
+
+  <!-- Hole shadow at the base of the flag -->
+  <ellipse cx="16" cy="25" rx="4" ry="1.4" fill="#16302371" />
+
+  <!-- Flagpole -->
+  <line x1="16" y1="25" x2="16" y2="6" stroke="#f4ede1" stroke-width="1.6" stroke-linecap="round" />
+
+  <!-- Flag, brass to match the accent color used throughout the app -->
+  <path d="M16 6.5 L24 9.5 L16 12.5 Z" fill="#b8874a" />
+</svg>
