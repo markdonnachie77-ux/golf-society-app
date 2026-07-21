@@ -1,0 +1,39 @@
+diff --git a/README.md b/README.md
+index c548041..148f925 100644
+--- a/README.md
++++ b/README.md
+@@ -127,6 +127,19 @@ manually set their `role` to `'admin'` — in Studio's table editor (Option A)
+ or the hosted project's table editor (Option B) — since self-registration
+ always creates `role = 'player'` by design.
+ 
++**Then log out and log back in as that player.** Role is baked into the
++session token at login time, not re-checked from the database on every
++request — flipping the database row alone leaves an already-logged-in
++session still carrying the old role. This shows up confusingly rather
++than obviously: pages that re-query the database directly (like the
++dashboard) correctly show admin buttons, but middleware's route
++protection reads the role from the session token, not the database, so
++clicking through to `/courses`/`/admin/approvals`/`/admin/settings`
++silently bounces back to `/dashboard` — it looks like the link does
++nothing, when what's actually happening is an instant redirect back to
++where you started. Logging out and back in issues a fresh token with the
++current database role and fixes it immediately.
++
+ ## 5. Run the app
+ 
+ ```bash
+@@ -492,9 +505,11 @@ exists` patterns) but isn't guaranteed for every migration going forward.
+   a single-instance deployment; move to a shared store before scaling to
+   multiple instances.
+ - **Admin promotion** has no UI yet — promote a player to admin directly in
+-  the Supabase table editor for now. A proper admin-management screen isn't
+-  in the spec's roadmap, so flagging it here rather than adding scope
+-  unprompted.
++  the Supabase table editor for now, then have them log out and back in
++  (session role is baked in at login time — see "Seed data" above for why
++  a bare database update alone isn't enough). A proper admin-management
++  screen isn't in the spec's roadmap, so flagging it here rather than
++  adding scope unprompted.
+ - **Editing a course's holes replaces the whole hole set** (delete + re-insert)
+   rather than diffing row-by-row. Fine before a season starts; if you edit a
+   course's holes after scorecards already reference its old hole rows, those
