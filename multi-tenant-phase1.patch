@@ -1,0 +1,390 @@
+diff --git a/.env.local.example b/.env.local.example
+index eb2a0a1..c366169 100644
+--- a/.env.local.example
++++ b/.env.local.example
+@@ -14,3 +14,18 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+ 
+ # Random string, 32+ characters. Generate with: openssl rand -base64 32
+ SESSION_SECRET=replace-with-a-long-random-string
++
++# Multi-tenant subdomain resolution (see README's "Future-proofing for
++# multi-tenancy" and middleware.ts). Leave UNSET for a single-tenant
++# deployment (like this one) — every request resolves to the one seeded
++# default society regardless, so this is entirely opt-in.
++#
++# Once you have a real platform domain for a shared multi-tenant
++# deployment, set this to it (no protocol, no subdomain):
++#   PLATFORM_ROOT_DOMAIN=example.com
++# Then requests to tenant-a.example.com / tenant-b.example.com resolve to
++# whichever society has that slug. For local testing before you own a
++# real platform domain, use "something.localhost:3000" in your browser —
++# no env var or /etc/hosts changes needed, modern browsers resolve any
++# *.localhost subdomain to 127.0.0.1 automatically.
++# PLATFORM_ROOT_DOMAIN=
+diff --git a/README.md b/README.md
+index c366b55..f92d03e 100644
+--- a/README.md
++++ b/README.md
+@@ -226,6 +226,51 @@ None of that is hard to reason about later — it's real, contained work,
+ not a rewrite — but it's real work, not schema. This migration just makes
+ that later work smaller.
+ 
++### Phase 1 status: tenant resolution (in progress, `feature/multi-tenant` branch)
++
++Built so far, not yet merged to `master`:
++
++- `lib/tenant-resolution.ts` — pure hostname parsing (`extractSubdomain`),
++  fully unit tested (`lib/__tests__/tenant-resolution.test.ts`), including
++  the two cases that matter most for safety: an unrelated custom domain
++  must never be mistaken for a subdomain match, and a domain that merely
++  *contains* the root as a substring must never match either.
++- `middleware.ts` now resolves a `society_id` from the request's hostname
++  on every request, before anything else runs, and forwards it downstream
++  as an `x-society-id` header — using `.set()` (not `.append()`), so a
++  client sending that header themselves gets silently overwritten, not
++  merged. An unrecognized subdomain gets a 404, not a silent fallback to
++  the default society — falling back silently there would be exactly the
++  kind of cross-tenant bug this whole effort exists to prevent.
++- `lib/tenant.ts` — `getCurrentSocietyId()`, reading that header for
++  Server Components/Actions to consume. Not called from anywhere yet;
++  it's the foundation Phase 3 (query scoping) will build on.
++- `PLATFORM_ROOT_DOMAIN` env var (see `.env.local.example`), unset by
++  default — every request resolves to the one seeded society regardless,
++  which is what makes this entire phase a no-op for the current
++  single-tenant deployment.
++
++**How to test this locally**, once you've pulled this branch:
++```bash
++npm run dev
++```
++Then in your browser:
++- `http://localhost:3000` — unaffected, default society (today's
++  behavior, unchanged)
++- `http://evs-golf-society.localhost:3000` — resolves the SAME default
++  society, by its actual slug, proving the subdomain lookup path works
++  end-to-end against the real database
++- `http://doesnotexist.localhost:3000` — should 404, proving an unknown
++  subdomain is rejected rather than silently falling back
++
++No `PLATFORM_ROOT_DOMAIN` needs to be set for any of this — `*.localhost`
++subdomain testing works with zero configuration, per the comments in
++`.env.local.example`.
++
++**Not done yet** (Phase 3, still ahead): no query anywhere actually
++filters by `society_id`. Every page still shows the same data regardless
++of which hostname resolved — that's the next, much larger piece of work.
++
+ ## Application settings (`/admin/settings`)
+ 
+ A general, extensible settings store — `app_settings` is a plain
+diff --git a/lib/__tests__/tenant-resolution.test.ts b/lib/__tests__/tenant-resolution.test.ts
+new file mode 100644
+index 0000000..d86ba45
+--- /dev/null
++++ b/lib/__tests__/tenant-resolution.test.ts
+@@ -0,0 +1,77 @@
++import { describe, it, expect } from "vitest";
++import { extractSubdomain } from "@/lib/tenant-resolution";
++
++describe("extractSubdomain — no root domain configured (single-tenant deployment)", () => {
++  it("returns null for bare localhost — the no-config, single-tenant default", () => {
++    expect(extractSubdomain("localhost:3000", undefined)).toBeNull();
++    expect(extractSubdomain("localhost", undefined)).toBeNull();
++  });
++
++  it("returns null for 127.0.0.1", () => {
++    expect(extractSubdomain("127.0.0.1:3000", undefined)).toBeNull();
++  });
++
++  it("still extracts a *.localhost subdomain even with no root domain configured", () => {
++    // This is deliberate: *.localhost testing works before a platform
++    // domain is even decided, let alone configured via env var.
++    expect(extractSubdomain("evs-golf-society.localhost:3000", undefined)).toBe(
++      "evs-golf-society"
++    );
++  });
++
++  it("returns null for any other domain when no root domain is configured", () => {
++    // No PLATFORM_ROOT_DOMAIN set means nothing outside localhost
++    // resolves to a tenant — this is what makes the feature a no-op for
++    // an unconfigured single-tenant deployment regardless of what
++    // hostname it's actually served from.
++    expect(extractSubdomain("evsgolfsociety.co.uk", undefined)).toBeNull();
++    expect(extractSubdomain("anything.example.com", undefined)).toBeNull();
++  });
++});
++
++describe("extractSubdomain — root domain configured", () => {
++  const root = "localgolfsociety.co.uk";
++
++  it("returns null for the bare apex domain", () => {
++    expect(extractSubdomain("localgolfsociety.co.uk", root)).toBeNull();
++  });
++
++  it("returns null for www", () => {
++    expect(extractSubdomain("www.localgolfsociety.co.uk", root)).toBeNull();
++  });
++
++  it("extracts a real tenant subdomain", () => {
++    expect(extractSubdomain("evs.localgolfsociety.co.uk", root)).toBe("evs");
++  });
++
++  it("extracts a tenant subdomain with a port (local testing against a configured root)", () => {
++    expect(extractSubdomain("evs.localgolfsociety.co.uk:3000", root)).toBe("evs");
++  });
++
++  it("is case-insensitive on both hostname and configured root domain", () => {
++    expect(extractSubdomain("EVS.LocalGolfSociety.co.uk", root)).toBe("evs");
++    expect(extractSubdomain("evs.localgolfsociety.co.uk", "LocalGolfSociety.co.uk")).toBe("evs");
++  });
++
++  it("returns null for an unrelated domain — e.g. a tenant's own custom domain", () => {
++    // Critical case: this must NOT silently fall back to matching
++    // anything. An unrelated domain (like a tenant's custom domain,
++    // which isn't handled by this function at all) returns null, same
++    // as "unrecognized" — the caller decides what null means, but this
++    // function must never guess a tenant for a hostname it doesn't
++    // actually recognize as belonging to the root domain.
++    expect(extractSubdomain("evsgolfsociety.co.uk", root)).toBeNull();
++  });
++
++  it("does not treat a domain that merely CONTAINS the root as a match", () => {
++    // e.g. "notlocalgolfsociety.co.uk" must not match root
++    // "localgolfsociety.co.uk" just because it ends with similar
++    // characters — only an exact "*.localgolfsociety.co.uk" suffix
++    // (with the dot) counts.
++    expect(extractSubdomain("notlocalgolfsociety.co.uk", root)).toBeNull();
++  });
++
++  it("handles a multi-label subdomain (e.g. a sub-tenant path some day)", () => {
++    expect(extractSubdomain("docs.evs.localgolfsociety.co.uk", root)).toBe("docs.evs");
++  });
++});
+diff --git a/lib/tenant-resolution.ts b/lib/tenant-resolution.ts
+new file mode 100644
+index 0000000..607b363
+--- /dev/null
++++ b/lib/tenant-resolution.ts
+@@ -0,0 +1,51 @@
++/**
++ * Pure hostname/subdomain parsing for multi-tenant resolution. No I/O —
++ * the actual database lookup (slug -> society) lives in middleware.ts,
++ * which needs Edge-runtime-safe fetch rather than importing anything
++ * from lib/supabase/server.ts (see the comment at the top of
++ * middleware.ts for why). This file is just the string logic, which is
++ * exactly the kind of thing worth getting right and testing thoroughly —
++ * a parsing bug here is a tenant-isolation bug, not just a cosmetic one.
++ */
++
++/**
++ * Extracts the tenant subdomain from a request's hostname, or null if
++ * there isn't one (apex domain, www, bare localhost/127.0.0.1 — all mean
++ * "use the default society"). Deliberately simple exact-suffix matching
++ * against ONE configured root domain, not a general-purpose public-
++ * suffix-list parser — correct for "one known platform domain", which is
++ * exactly what this needs, not for arbitrary domains.
++ *
++ * Returns null (not the root domain's own tenant) for anything that
++ * doesn't match a recognized pattern — including what's likely a
++ * tenant's own custom domain (e.g. evsgolfsociety.co.uk), since custom-
++ * domain-to-society mapping isn't built yet. The caller decides what
++ * "null" means (fall back to default vs. reject) — this function only
++ * parses, it doesn't decide policy.
++ */
++export function extractSubdomain(hostname: string, rootDomain: string | undefined): string | null {
++  const host = hostname.split(":")[0].toLowerCase();
++
++  // Local dev: "something.localhost:3000" resolves to 127.0.0.1 in every
++  // modern browser with zero /etc/hosts editing, letting you test
++  // subdomain resolution before PLATFORM_ROOT_DOMAIN is configured or a
++  // real platform domain even exists yet.
++  if (host.endsWith(".localhost")) {
++    const sub = host.slice(0, -".localhost".length);
++    return sub === "" ? null : sub;
++  }
++  if (host === "localhost" || host === "127.0.0.1") {
++    return null;
++  }
++
++  if (!rootDomain) return null;
++
++  const root = rootDomain.toLowerCase();
++  if (host === root || host === `www.${root}`) return null;
++  if (host.endsWith(`.${root}`)) {
++    const sub = host.slice(0, -(`.${root}`.length));
++    return sub === "" ? null : sub;
++  }
++
++  return null;
++}
+diff --git a/lib/tenant.ts b/lib/tenant.ts
+new file mode 100644
+index 0000000..58384a8
+--- /dev/null
++++ b/lib/tenant.ts
+@@ -0,0 +1,32 @@
++import "server-only";
++import { headers } from "next/headers";
++
++/**
++ * Reads the society_id that middleware resolved for this request (see
++ * middleware.ts's resolveSociety) from the request header it set.
++ *
++ * Not yet used anywhere in application code — this exists as the
++ * foundation for Phase 3 of the multi-tenant plan (adding society_id
++ * filters to every query), not because anything currently needs
++ * per-request tenant scoping. Right now there's exactly one society, so
++ * every request already resolves to it regardless.
++ *
++ * Throws rather than silently defaulting if the header is missing,
++ * because that should only ever happen if middleware didn't run for this
++ * request (a matcher misconfiguration, or code calling this from
++ * somewhere middleware doesn't cover) — silently falling back to the
++ * default society here would hide exactly the kind of bug that matters
++ * most once a second tenant exists.
++ */
++export async function getCurrentSocietyId(): Promise<string> {
++  const headersList = await headers();
++  const societyId = headersList.get("x-society-id");
++
++  if (!societyId) {
++    throw new Error(
++      "No society_id header found on this request — middleware may not have run for this route."
++    );
++  }
++
++  return societyId;
++}
+diff --git a/middleware.ts b/middleware.ts
+index d1e9742..a58b977 100644
+--- a/middleware.ts
++++ b/middleware.ts
+@@ -1,5 +1,6 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { jwtVerify } from "jose";
++import { extractSubdomain } from "@/lib/tenant-resolution";
+ 
+ // Middleware runs in the Edge runtime, which can't import "server-only"
+ // code (lib/auth.ts pulls in bcryptjs/next-headers helpers not edge-safe
+@@ -11,6 +12,81 @@ const SESSION_COOKIE_NAME = "gs_session";
+ const PUBLIC_PATHS = ["/login", "/register"];
+ const ADMIN_PATH_PREFIXES = ["/admin", "/courses"];
+ 
++// ---------------------------------------------------------------------------
++// Multi-tenant resolution
++// ---------------------------------------------------------------------------
++//
++// This is Phase 1 of moving toward a shared multi-tenant deployment (see
++// README's "Future-proofing for multi-tenancy" section) — resolving WHICH
++// society a request is for, from its hostname. Nothing downstream is
++// scoped by this yet (that's Phase 3: adding society_id filters to every
++// query) — this phase only establishes, correctly and testably, which
++// society_id a request should eventually be scoped to.
++//
++// PLATFORM_ROOT_DOMAIN unset (the common case today — a single-tenant
++// deployment) means every request resolves to the one default society
++// below, unconditionally. That's what makes this entire feature a no-op
++// until that env var is actually configured — an existing single-tenant
++// deployment needs zero changes to keep working exactly as it does today.
++
++const DEFAULT_SOCIETY_ID = "00000000-0000-0000-0000-000000000001";
++const SOCIETY_HEADER = "x-society-id";
++
++interface ResolvedSociety {
++  id: string;
++  slug: string;
++}
++
++// Tiny in-memory cache so repeated requests hitting the same Edge
++// instance don't re-query Supabase every time. Edge instances are
++// distributed and short-lived, so this is a best-effort optimization, not
++// a correctness requirement — every cache miss just does a real lookup.
++// Worth replacing with Vercel Edge Config if/when there are enough
++// tenants or enough traffic for this to matter.
++const societyCache = new Map<string, { society: ResolvedSociety | null; expiresAt: number }>();
++const CACHE_TTL_MS = 60_000;
++
++async function lookupSocietyBySlug(slug: string): Promise<ResolvedSociety | null> {
++  const cached = societyCache.get(slug);
++  if (cached && cached.expiresAt > Date.now()) {
++    return cached.society;
++  }
++
++  const url = process.env.SUPABASE_URL;
++  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
++  if (!url || !key) return null;
++
++  try {
++    const response = await fetch(
++      `${url}/rest/v1/societies?slug=eq.${encodeURIComponent(slug)}&select=id,slug`,
++      { headers: { apikey: key, Authorization: `Bearer ${key}` } }
++    );
++    if (!response.ok) return null;
++
++    const rows = (await response.json()) as ResolvedSociety[];
++    const found = rows[0] ?? null;
++    societyCache.set(slug, { society: found, expiresAt: Date.now() + CACHE_TTL_MS });
++    return found;
++  } catch {
++    return null;
++  }
++}
++
++/** Resolves which society a request's hostname belongs to.
++ * - "default" — no subdomain present, use the one seeded society
++ * - a ResolvedSociety — a real, matched tenant
++ * - null — a subdomain WAS present but didn't match any known society;
++ *   the caller should reject the request rather than silently falling
++ *   back to the default tenant's data. Falling back silently here would
++ *   be a real cross-tenant bug waiting to happen — a typo'd or
++ *   not-yet-provisioned subdomain must never quietly show someone else's
++ *   society instead. */
++async function resolveSociety(hostname: string): Promise<ResolvedSociety | "default" | null> {
++  const subdomain = extractSubdomain(hostname, process.env.PLATFORM_ROOT_DOMAIN);
++  if (!subdomain) return "default";
++  return lookupSocietyBySlug(subdomain);
++}
++
+ function getSessionSecret(): Uint8Array {
+   const secret = process.env.SESSION_SECRET;
+   if (!secret) {
+@@ -35,6 +111,21 @@ async function readSession(token: string | undefined) {
+ export async function middleware(request: NextRequest) {
+   const { pathname } = request.nextUrl;
+ 
++  const resolved = await resolveSociety(request.headers.get("host") ?? "");
++  if (resolved === null) {
++    return new NextResponse("Society not found", { status: 404 });
++  }
++  const societyId = resolved === "default" ? DEFAULT_SOCIETY_ID : resolved.id;
++
++  // Forwarded to every downstream Server Component/Action as a request
++  // header. Using .set() (not .append()) unconditionally overwrites
++  // anything a client tried to send under this name — the resolved value
++  // always wins, a client can't spoof its own tenant by sending this
++  // header directly.
++  const requestHeaders = new Headers(request.headers);
++  requestHeaders.set(SOCIETY_HEADER, societyId);
++  const withTenantHeader = { request: { headers: requestHeaders } };
++
+   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+   const session = await readSession(token);
+@@ -44,7 +135,7 @@ export async function middleware(request: NextRequest) {
+     if (session) {
+       return NextResponse.redirect(new URL("/dashboard", request.url));
+     }
+-    return NextResponse.next();
++    return NextResponse.next(withTenantHeader);
+   }
+ 
+   if (!session) {
+@@ -57,7 +148,7 @@ export async function middleware(request: NextRequest) {
+     return NextResponse.redirect(new URL("/dashboard", request.url));
+   }
+ 
+-  return NextResponse.next();
++  return NextResponse.next(withTenantHeader);
+ }
+ 
+ export const config = {

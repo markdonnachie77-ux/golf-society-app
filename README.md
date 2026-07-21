@@ -226,6 +226,51 @@ None of that is hard to reason about later — it's real, contained work,
 not a rewrite — but it's real work, not schema. This migration just makes
 that later work smaller.
 
+### Phase 1 status: tenant resolution (in progress, `feature/multi-tenant` branch)
+
+Built so far, not yet merged to `master`:
+
+- `lib/tenant-resolution.ts` — pure hostname parsing (`extractSubdomain`),
+  fully unit tested (`lib/__tests__/tenant-resolution.test.ts`), including
+  the two cases that matter most for safety: an unrelated custom domain
+  must never be mistaken for a subdomain match, and a domain that merely
+  *contains* the root as a substring must never match either.
+- `middleware.ts` now resolves a `society_id` from the request's hostname
+  on every request, before anything else runs, and forwards it downstream
+  as an `x-society-id` header — using `.set()` (not `.append()`), so a
+  client sending that header themselves gets silently overwritten, not
+  merged. An unrecognized subdomain gets a 404, not a silent fallback to
+  the default society — falling back silently there would be exactly the
+  kind of cross-tenant bug this whole effort exists to prevent.
+- `lib/tenant.ts` — `getCurrentSocietyId()`, reading that header for
+  Server Components/Actions to consume. Not called from anywhere yet;
+  it's the foundation Phase 3 (query scoping) will build on.
+- `PLATFORM_ROOT_DOMAIN` env var (see `.env.local.example`), unset by
+  default — every request resolves to the one seeded society regardless,
+  which is what makes this entire phase a no-op for the current
+  single-tenant deployment.
+
+**How to test this locally**, once you've pulled this branch:
+```bash
+npm run dev
+```
+Then in your browser:
+- `http://localhost:3000` — unaffected, default society (today's
+  behavior, unchanged)
+- `http://evs-golf-society.localhost:3000` — resolves the SAME default
+  society, by its actual slug, proving the subdomain lookup path works
+  end-to-end against the real database
+- `http://doesnotexist.localhost:3000` — should 404, proving an unknown
+  subdomain is rejected rather than silently falling back
+
+No `PLATFORM_ROOT_DOMAIN` needs to be set for any of this — `*.localhost`
+subdomain testing works with zero configuration, per the comments in
+`.env.local.example`.
+
+**Not done yet** (Phase 3, still ahead): no query anywhere actually
+filters by `society_id`. Every page still shows the same data regardless
+of which hostname resolved — that's the next, much larger piece of work.
+
 ## Application settings (`/admin/settings`)
 
 A general, extensible settings store — `app_settings` is a plain
