@@ -150,18 +150,17 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
     return { ok: false, error: "Could not update the course. Please try again." };
   }
 
-  // Simplest correct approach for an edit: replace the whole hole set.
-  // Holes have no independent identity the rest of the app depends on
-  // (scores reference hole_id, so editing an existing course's holes
-  // after rounds have been recorded against it will orphan those old
-  // hole references — acceptable for pre-season setup, but worth knowing
-  // if you edit a course mid-season with existing scorecards on it).
-  const { error: deleteError } = await supabase.from("holes").delete().eq("course_id", courseId);
-  if (deleteError) {
-    return { ok: false, error: "Could not update hole details. Please try again." };
-  }
-
-  const { error: holesError } = await supabase.from("holes").insert(
+  // Upsert (not delete+insert) — matches existing hole rows by
+  // (course_id, hole_number), the unique constraint from
+  // 0003_create_holes.sql, and updates them in place, preserving their
+  // `id`. This matters because scores.hole_id has ON DELETE RESTRICT (see
+  // 0005_create_scores.sql): once a round has been played on this course,
+  // its scores rows reference specific hole ids, and deleting those hole
+  // rows — the previous delete-then-reinsert approach — gets rejected by
+  // Postgres with a foreign-key violation. That was a real bug, not a
+  // hypothetical: editing just the cut/increase rate on a course that
+  // already had a round recorded against it failed here.
+  const { error: upsertError } = await supabase.from("holes").upsert(
     holes.map((h) => ({
       course_id: courseId,
       hole_number: h.holeNumber,
@@ -169,14 +168,35 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
       stroke_index: h.strokeIndex,
       white_yards: h.whiteYards,
       yellow_yards: h.yellowYards,
-    }))
+    })),
+    { onConflict: "course_id,hole_number" }
   );
 
-  if (holesError) {
+  if (upsertError) {
     return {
       ok: false,
       error:
         "Could not save the hole details (check stroke indices are all unique and in range).",
+    };
+  }
+
+  // If the hole count went down (e.g. 18 -> 9), any now-excess holes
+  // (hole_number beyond the new count) need removing. This can still hit
+  // the same ON DELETE RESTRICT if a round was already played using one
+  // of those specific holes — surfaced as a clear, specific reason rather
+  // than a generic failure, since silently reassigning or losing that
+  // round's hole detail isn't a safe default to pick automatically.
+  const { error: excessHolesError } = await supabase
+    .from("holes")
+    .delete()
+    .eq("course_id", courseId)
+    .gt("hole_number", details.holeCount);
+
+  if (excessHolesError) {
+    return {
+      ok: false,
+      error:
+        "Reduced the hole count, but couldn't remove the extra holes — a round has likely already been recorded using one of them, so this course can't shrink below holes that are already in use.",
     };
   }
 
