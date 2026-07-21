@@ -49,34 +49,25 @@ const CACHE_TTL_MS = 60_000;
 async function lookupSocietyBySlug(slug: string): Promise<ResolvedSociety | null> {
   const cached = societyCache.get(slug);
   if (cached && cached.expiresAt > Date.now()) {
-    console.log(`[tenant] "${slug}" -> cache hit:`, cached.society);
     return cached.society;
   }
 
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    console.log(`[tenant] "${slug}" -> SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing in middleware env`);
-    return null;
-  }
+  if (!url || !key) return null;
 
   try {
     const response = await fetch(
       `${url}/rest/v1/societies?slug=eq.${encodeURIComponent(slug)}&select=id,slug`,
       { headers: { apikey: key, Authorization: `Bearer ${key}` } }
     );
-    if (!response.ok) {
-      console.log(`[tenant] "${slug}" -> lookup HTTP ${response.status}:`, await response.text());
-      return null;
-    }
+    if (!response.ok) return null;
 
     const rows = (await response.json()) as ResolvedSociety[];
-    console.log(`[tenant] "${slug}" -> query returned ${rows.length} row(s):`, rows);
     const found = rows[0] ?? null;
     societyCache.set(slug, { society: found, expiresAt: Date.now() + CACHE_TTL_MS });
     return found;
-  } catch (err) {
-    console.log(`[tenant] "${slug}" -> lookup threw:`, err);
+  } catch {
     return null;
   }
 }
@@ -134,14 +125,11 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const hostHeader = request.headers.get("host") ?? "";
-  const userAgent = request.headers.get("user-agent") ?? "unknown";
   const resolved = await resolveSociety(hostHeader);
-  console.log(`[tenant] host="${hostHeader}" path="${pathname}" ua="${userAgent}" -> resolved=`, resolved);
   if (resolved === null) {
     return new NextResponse("Society not found", { status: 404 });
   }
   const societyId = resolved === "default" ? DEFAULT_SOCIETY_ID : resolved.id;
-  console.log(`[tenant] -> using societyId=${societyId}`);
 
   // Forwarded to every downstream Server Component/Action as a request
   // header. Using .set() (not .append()) unconditionally overwrites

@@ -1,0 +1,94 @@
+diff --git a/app/actions/auth.ts b/app/actions/auth.ts
+index 91e07c6..b199e8c 100644
+--- a/app/actions/auth.ts
++++ b/app/actions/auth.ts
+@@ -165,8 +165,6 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
+ // ---------- Logout ----------
+ 
+ export async function logout() {
+-  const societyId = await getCurrentSocietyId();
+-  console.log(`[logout] running with societyId=${societyId}`);
+   await clearSessionCookie();
+   redirect("/login");
+ }
+@@ -175,22 +173,13 @@ export async function logout() {
+ 
+ export async function listPlayersForLogin() {
+   const societyId = await getCurrentSocietyId();
+-  console.log(`[listPlayersForLogin] getCurrentSocietyId() = ${societyId}`);
+-
+   const supabase = createServiceClient();
+   const { data, error } = await supabase
+     .from("players")
+-    .select("id, first_name, last_name, society_id")
++    .select("id, first_name, last_name")
+     .eq("society_id", societyId)
+     .order("last_name", { ascending: true });
+ 
+-  console.log(
+-    `[listPlayersForLogin] query returned ${data?.length ?? 0} row(s), error=`,
+-    error,
+-    "rows:",
+-    data
+-  );
+-
+   if (error) return [];
+   return data;
+ }
+diff --git a/middleware.ts b/middleware.ts
+index 1a809b8..ee3bf56 100644
+--- a/middleware.ts
++++ b/middleware.ts
+@@ -49,34 +49,25 @@ const CACHE_TTL_MS = 60_000;
+ async function lookupSocietyBySlug(slug: string): Promise<ResolvedSociety | null> {
+   const cached = societyCache.get(slug);
+   if (cached && cached.expiresAt > Date.now()) {
+-    console.log(`[tenant] "${slug}" -> cache hit:`, cached.society);
+     return cached.society;
+   }
+ 
+   const url = process.env.SUPABASE_URL;
+   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+-  if (!url || !key) {
+-    console.log(`[tenant] "${slug}" -> SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing in middleware env`);
+-    return null;
+-  }
++  if (!url || !key) return null;
+ 
+   try {
+     const response = await fetch(
+       `${url}/rest/v1/societies?slug=eq.${encodeURIComponent(slug)}&select=id,slug`,
+       { headers: { apikey: key, Authorization: `Bearer ${key}` } }
+     );
+-    if (!response.ok) {
+-      console.log(`[tenant] "${slug}" -> lookup HTTP ${response.status}:`, await response.text());
+-      return null;
+-    }
++    if (!response.ok) return null;
+ 
+     const rows = (await response.json()) as ResolvedSociety[];
+-    console.log(`[tenant] "${slug}" -> query returned ${rows.length} row(s):`, rows);
+     const found = rows[0] ?? null;
+     societyCache.set(slug, { society: found, expiresAt: Date.now() + CACHE_TTL_MS });
+     return found;
+-  } catch (err) {
+-    console.log(`[tenant] "${slug}" -> lookup threw:`, err);
++  } catch {
+     return null;
+   }
+ }
+@@ -134,14 +125,11 @@ export async function middleware(request: NextRequest) {
+   const { pathname } = request.nextUrl;
+ 
+   const hostHeader = request.headers.get("host") ?? "";
+-  const userAgent = request.headers.get("user-agent") ?? "unknown";
+   const resolved = await resolveSociety(hostHeader);
+-  console.log(`[tenant] host="${hostHeader}" path="${pathname}" ua="${userAgent}" -> resolved=`, resolved);
+   if (resolved === null) {
+     return new NextResponse("Society not found", { status: 404 });
+   }
+   const societyId = resolved === "default" ? DEFAULT_SOCIETY_ID : resolved.id;
+-  console.log(`[tenant] -> using societyId=${societyId}`);
+ 
+   // Forwarded to every downstream Server Component/Action as a request
+   // header. Using .set() (not .append()) unconditionally overwrites

@@ -165,8 +165,6 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
 // ---------- Logout ----------
 
 export async function logout() {
-  const societyId = await getCurrentSocietyId();
-  console.log(`[logout] running with societyId=${societyId}`);
   await clearSessionCookie();
   redirect("/login");
 }
@@ -175,21 +173,12 @@ export async function logout() {
 
 export async function listPlayersForLogin() {
   const societyId = await getCurrentSocietyId();
-  console.log(`[listPlayersForLogin] getCurrentSocietyId() = ${societyId}`);
-
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("players")
-    .select("id, first_name, last_name, society_id")
+    .select("id, first_name, last_name")
     .eq("society_id", societyId)
     .order("last_name", { ascending: true });
-
-  console.log(
-    `[listPlayersForLogin] query returned ${data?.length ?? 0} row(s), error=`,
-    error,
-    "rows:",
-    data
-  );
 
   if (error) return [];
   return data;
