@@ -232,6 +232,30 @@ export interface Database {
           }
         ];
       };
+      app_settings: {
+        Row: {
+          key: string;
+          value: unknown;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          key: string;
+          value: unknown;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["app_settings"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "app_settings_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "players";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: {};
     // Functions are intentionally omitted — approve_scorecard/reject_scorecard

@@ -7,6 +7,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
 import { filterHolesForRoundType } from "@/lib/round-setup";
 import type { ActionResult } from "@/app/actions/auth";
+import { getAppSettings } from "@/app/actions/settings";
 
 // ---------- Course/hole lookups used while building the scorecard form ----------
 
@@ -59,6 +60,16 @@ const submitSchema = z.object({
 
 export async function createScorecard(formData: FormData): Promise<ActionResult> {
   const session = await requireSession();
+
+  if (session.role !== "admin") {
+    const settings = await getAppSettings();
+    if (!settings.playersCanLogOwnRounds) {
+      return {
+        ok: false,
+        error: "Round logging is currently restricted to admins — ask an admin to log this round for you.",
+      };
+    }
+  }
 
   // Admins can log a round on behalf of another player (e.g. a member
   // without a phone handy, or entering a paper scorecard). Everyone else

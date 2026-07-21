@@ -162,6 +162,32 @@ assumptions the spec didn't pin down explicitly — both flagged with an
 - Stableford points flatten at 5 for anything better than an albatross
   (net −3), since the spec's table doesn't define a rate beyond that.
 
+## Application settings (`/admin/settings`)
+
+A general, extensible settings store — `app_settings` is a plain
+key/value table (`supabase/migrations/0014_app_settings.sql`), not one
+column per setting. Adding the next setting later needs **no new
+migration**: add its key to `SettingKey` and a field to `AppSettings` in
+`app/actions/settings.ts`, add a row to the mapping in `getAppSettings()`,
+and drop a `<SettingToggle>` onto `/admin/settings`'s page. The `value`
+column is `jsonb`, so future settings aren't limited to booleans either.
+
+**First setting: "Players can log their own rounds."** Turning it off
+means only admins can log a round — for any player, including their own.
+Admins logging on behalf of another player are unaffected either way.
+
+This is enforced in three places, deliberately not just one:
+1. The dashboard hides "Log a round" for non-admins when it's off
+2. `/rounds/new` shows an explanatory message instead of the form if a
+   non-admin reaches it directly (typing the URL, an old bookmark, etc.)
+3. **`createScorecard` rejects the submission outright** if a non-admin
+   session tries it while the setting is off
+
+Only #3 is the actual security boundary — #1 and #2 are UX, not
+protection. If you're auditing this for a security review, that's the one
+line that matters; the rest just avoids showing a form nobody's allowed
+to submit.
+
 ## Admins logging a round on behalf of a player
 
 `/rounds/new` shows an extra "Log this round for" picker, admin-only —

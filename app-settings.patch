@@ -1,0 +1,481 @@
+diff --git a/README.md b/README.md
+index 6dc33fc..c07fd46 100644
+--- a/README.md
++++ b/README.md
+@@ -162,6 +162,32 @@ assumptions the spec didn't pin down explicitly — both flagged with an
+ - Stableford points flatten at 5 for anything better than an albatross
+   (net −3), since the spec's table doesn't define a rate beyond that.
+ 
++## Application settings (`/admin/settings`)
++
++A general, extensible settings store — `app_settings` is a plain
++key/value table (`supabase/migrations/0014_app_settings.sql`), not one
++column per setting. Adding the next setting later needs **no new
++migration**: add its key to `SettingKey` and a field to `AppSettings` in
++`app/actions/settings.ts`, add a row to the mapping in `getAppSettings()`,
++and drop a `<SettingToggle>` onto `/admin/settings`'s page. The `value`
++column is `jsonb`, so future settings aren't limited to booleans either.
++
++**First setting: "Players can log their own rounds."** Turning it off
++means only admins can log a round — for any player, including their own.
++Admins logging on behalf of another player are unaffected either way.
++
++This is enforced in three places, deliberately not just one:
++1. The dashboard hides "Log a round" for non-admins when it's off
++2. `/rounds/new` shows an explanatory message instead of the form if a
++   non-admin reaches it directly (typing the URL, an old bookmark, etc.)
++3. **`createScorecard` rejects the submission outright** if a non-admin
++   session tries it while the setting is off
++
++Only #3 is the actual security boundary — #1 and #2 are UX, not
++protection. If you're auditing this for a security review, that's the one
++line that matters; the rest just avoids showing a form nobody's allowed
++to submit.
++
+ ## Admins logging a round on behalf of a player
+ 
+ `/rounds/new` shows an extra "Log this round for" picker, admin-only —
+diff --git a/app/actions/scorecards.ts b/app/actions/scorecards.ts
+index 6b2aed9..4eb7b57 100644
+--- a/app/actions/scorecards.ts
++++ b/app/actions/scorecards.ts
+@@ -7,6 +7,7 @@ import { createServiceClient } from "@/lib/supabase/server";
+ import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
+ import { filterHolesForRoundType } from "@/lib/round-setup";
+ import type { ActionResult } from "@/app/actions/auth";
++import { getAppSettings } from "@/app/actions/settings";
+ 
+ // ---------- Course/hole lookups used while building the scorecard form ----------
+ 
+@@ -60,6 +61,16 @@ const submitSchema = z.object({
+ export async function createScorecard(formData: FormData): Promise<ActionResult> {
+   const session = await requireSession();
+ 
++  if (session.role !== "admin") {
++    const settings = await getAppSettings();
++    if (!settings.playersCanLogOwnRounds) {
++      return {
++        ok: false,
++        error: "Round logging is currently restricted to admins — ask an admin to log this round for you.",
++      };
++    }
++  }
++
+   // Admins can log a round on behalf of another player (e.g. a member
+   // without a phone handy, or entering a paper scorecard). Everyone else
+   // can only ever submit for themselves — this is enforced here, not just
+diff --git a/app/actions/settings.ts b/app/actions/settings.ts
+new file mode 100644
+index 0000000..f933069
+--- /dev/null
++++ b/app/actions/settings.ts
+@@ -0,0 +1,67 @@
++"use server";
++
++import { requireSession, requireAdmin } from "@/lib/auth";
++import { createServiceClient } from "@/lib/supabase/server";
++import type { ActionResult } from "@/app/actions/auth";
++
++/**
++ * Known setting keys. Adding a new setting means: add its key here, add a
++ * field + default to AppSettings/DEFAULTS below, and add a row for it in
++ * getAppSettings' mapping. No migration needed — app_settings is a plain
++ * key/value table (see 0014_app_settings.sql) — just insert/update a row.
++ */
++export type SettingKey = "players_can_log_own_rounds";
++
++export interface AppSettings {
++  /** When false, only admins can log rounds — for a player, even their
++   * own. Admins logging on behalf of another player are never affected
++   * by this setting either way. */
++  playersCanLogOwnRounds: boolean;
++}
++
++const DEFAULTS: AppSettings = {
++  playersCanLogOwnRounds: true,
++};
++
++/** Any authenticated session can read settings — needed to decide what
++ * to show/allow on ordinary pages (e.g. whether to show "Log a round").
++ * Only admins can WRITE (see updateSetting below). Missing rows fall back
++ * to DEFAULTS, so a fresh database with no settings rows yet behaves
++ * exactly like today — nothing silently breaks for an existing install. */
++export async function getAppSettings(): Promise<AppSettings> {
++  await requireSession();
++  const supabase = createServiceClient();
++
++  const { data, error } = await supabase.from("app_settings").select("key, value");
++
++  if (error || !data) return { ...DEFAULTS };
++
++  const byKey = new Map(data.map((row) => [row.key, row.value]));
++
++  return {
++    playersCanLogOwnRounds:
++      (byKey.get("players_can_log_own_rounds") as boolean | undefined) ??
++      DEFAULTS.playersCanLogOwnRounds,
++  };
++}
++
++export async function updateSetting(key: SettingKey, value: boolean): Promise<ActionResult> {
++  const session = await requireAdmin();
++  const supabase = createServiceClient();
++
++  const { error } = await supabase.from("app_settings").upsert(
++    {
++      key,
++      value,
++      updated_by: session.playerId,
++      updated_at: new Date().toISOString(),
++    },
++    { onConflict: "key" }
++  );
++
++  if (error) {
++    return { ok: false, error: error.message || "Could not save this setting." };
++  }
++
++  return { ok: true };
++}
+diff --git a/app/admin/settings/page.tsx b/app/admin/settings/page.tsx
+new file mode 100644
+index 0000000..26edc6d
+--- /dev/null
++++ b/app/admin/settings/page.tsx
+@@ -0,0 +1,32 @@
++import { requireAdmin } from "@/lib/auth";
++import { getAppSettings } from "@/app/actions/settings";
++import { SettingToggle } from "@/components/admin-setting-toggle";
++import { BrandEyebrow } from "@/components/brand-eyebrow";
++
++export default async function AdminSettingsPage() {
++  await requireAdmin();
++  const settings = await getAppSettings();
++
++  return (
++    <main className="min-h-screen bg-background px-4 py-12">
++      <div className="mx-auto max-w-2xl">
++        <div className="mb-8">
++          <BrandEyebrow />
++          <h1 className="font-display mt-1 text-3xl font-semibold">Settings</h1>
++          <p className="mt-1 text-sm text-muted-foreground">
++            Application-wide settings for the whole society.
++          </p>
++        </div>
++
++        <div className="rounded-lg border border-border bg-card">
++          <SettingToggle
++            settingKey="players_can_log_own_rounds"
++            label="Players can log their own rounds"
++            description="Turn off to require every round to go through an admin instead — self-submitted scores stay off, admins can still log a round on behalf of any player."
++            initialValue={settings.playersCanLogOwnRounds}
++          />
++        </div>
++      </div>
++    </main>
++  );
++}
+diff --git a/app/dashboard/page.tsx b/app/dashboard/page.tsx
+index f2ad521..80a7dfc 100644
+--- a/app/dashboard/page.tsx
++++ b/app/dashboard/page.tsx
+@@ -2,6 +2,7 @@ import Link from "next/link";
+ import { requireSession } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
+ import { logout } from "@/app/actions/auth";
++import { getAppSettings } from "@/app/actions/settings";
+ import { Button } from "@/components/ui/button";
+ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+ import { BrandEyebrow } from "@/components/brand-eyebrow";
+@@ -10,11 +11,17 @@ export default async function DashboardPage() {
+   const session = await requireSession();
+   const supabase = createServiceClient();
+ 
+-  const { data: player } = await supabase
+-    .from("players")
+-    .select("first_name, last_name, current_handicap, role")
+-    .eq("id", session.playerId)
+-    .single();
++  const [{ data: player }, settings] = await Promise.all([
++    supabase
++      .from("players")
++      .select("first_name, last_name, current_handicap, role")
++      .eq("id", session.playerId)
++      .single(),
++    getAppSettings(),
++  ]);
++
++  const isAdmin = player?.role === "admin";
++  const canLogRounds = isAdmin || settings.playersCanLogOwnRounds;
+ 
+   return (
+     <main className="min-h-screen bg-background px-4 py-12">
+@@ -34,9 +41,11 @@ export default async function DashboardPage() {
+         </div>
+ 
+         <nav className="mb-8 flex flex-wrap gap-2">
+-          <Button asChild variant="accent" size="sm">
+-            <Link href="/rounds/new">Log a round</Link>
+-          </Button>
++          {canLogRounds && (
++            <Button asChild variant="accent" size="sm">
++              <Link href="/rounds/new">Log a round</Link>
++            </Button>
++          )}
+           <Button asChild variant="outline" size="sm">
+             <Link href={`/players/${session.playerId}`}>My profile</Link>
+           </Button>
+@@ -46,7 +55,7 @@ export default async function DashboardPage() {
+           <Button asChild variant="outline" size="sm">
+             <Link href="/players">Members</Link>
+           </Button>
+-          {player?.role === "admin" && (
++          {isAdmin && (
+             <>
+               <Button asChild variant="outline" size="sm">
+                 <Link href="/admin/approvals">Approvals</Link>
+@@ -54,6 +63,9 @@ export default async function DashboardPage() {
+               <Button asChild variant="outline" size="sm">
+                 <Link href="/courses">Courses</Link>
+               </Button>
++              <Button asChild variant="outline" size="sm">
++                <Link href="/admin/settings">Settings</Link>
++              </Button>
+             </>
+           )}
+         </nav>
+diff --git a/app/rounds/new/page.tsx b/app/rounds/new/page.tsx
+index c0b5b1e..d8cd3d4 100644
+--- a/app/rounds/new/page.tsx
++++ b/app/rounds/new/page.tsx
+@@ -2,6 +2,7 @@ import { requireSession } from "@/lib/auth";
+ import { createServiceClient } from "@/lib/supabase/server";
+ import { listCoursesForRound } from "@/app/actions/scorecards";
+ import { listAllPlayers } from "@/app/actions/players";
++import { getAppSettings } from "@/app/actions/settings";
+ import { NewScorecardForm } from "@/components/new-scorecard-form";
+ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+ import { BrandEyebrow } from "@/components/brand-eyebrow";
+@@ -11,14 +12,22 @@ export default async function NewRoundPage() {
+   const supabase = createServiceClient();
+   const isAdmin = session.role === "admin";
+ 
+-  const [courses, { data: player }, allPlayers] = await Promise.all([
++  const [courses, { data: player }, allPlayers, settings] = await Promise.all([
+     listCoursesForRound(),
+     supabase.from("players").select("current_handicap").eq("id", session.playerId).single(),
+     // Only admins get the "log on behalf of" picker, so don't bother
+     // fetching the whole player directory for everyone else.
+     isAdmin ? listAllPlayers() : Promise.resolve([]),
++    getAppSettings(),
+   ]);
+ 
++  // Defense in depth: the dashboard already hides the "Log a round" link
++  // for non-admins when this setting is off, but that alone wouldn't stop
++  // someone typing the URL directly. createScorecard enforces this too —
++  // this is just what a blocked player sees instead of the form, not the
++  // actual security boundary.
++  const blocked = !isAdmin && !settings.playersCanLogOwnRounds;
++
+   return (
+     <main className="min-h-screen bg-background px-4 py-12">
+       <div className="mx-auto max-w-2xl">
+@@ -27,23 +36,32 @@ export default async function NewRoundPage() {
+           <h1 className="font-display mt-1 text-3xl font-semibold">Log a round</h1>
+         </div>
+ 
+-        <Card>
+-          <CardHeader>
+-            <CardTitle className="text-lg">Scorecard</CardTitle>
+-            <CardDescription>
+-              Enter your gross score for each hole — your estimated result updates as you go.
+-            </CardDescription>
+-          </CardHeader>
+-          <CardContent>
+-            <NewScorecardForm
+-              courses={courses}
+-              defaultHandicap={player?.current_handicap ?? 0}
+-              viewerPlayerId={session.playerId}
+-              isAdmin={isAdmin}
+-              allPlayers={allPlayers}
+-            />
+-          </CardContent>
+-        </Card>
++        {blocked ? (
++          <Card>
++            <CardContent className="py-10 text-center text-muted-foreground">
++              Round logging is currently restricted to admins — ask an admin to log this round
++              for you.
++            </CardContent>
++          </Card>
++        ) : (
++          <Card>
++            <CardHeader>
++              <CardTitle className="text-lg">Scorecard</CardTitle>
++              <CardDescription>
++                Enter your gross score for each hole — your estimated result updates as you go.
++              </CardDescription>
++            </CardHeader>
++            <CardContent>
++              <NewScorecardForm
++                courses={courses}
++                defaultHandicap={player?.current_handicap ?? 0}
++                viewerPlayerId={session.playerId}
++                isAdmin={isAdmin}
++                allPlayers={allPlayers}
++              />
++            </CardContent>
++          </Card>
++        )}
+       </div>
+     </main>
+   );
+diff --git a/components/admin-setting-toggle.tsx b/components/admin-setting-toggle.tsx
+new file mode 100644
+index 0000000..5c42506
+--- /dev/null
++++ b/components/admin-setting-toggle.tsx
+@@ -0,0 +1,70 @@
++"use client";
++
++import * as React from "react";
++import { useRouter } from "next/navigation";
++import { cn } from "@/lib/utils";
++import { updateSetting, type SettingKey } from "@/app/actions/settings";
++
++export function SettingToggle({
++  settingKey,
++  label,
++  description,
++  initialValue,
++}: {
++  settingKey: SettingKey;
++  label: string;
++  description: string;
++  initialValue: boolean;
++}) {
++  const router = useRouter();
++  const [value, setValue] = React.useState(initialValue);
++  const [pending, setPending] = React.useState(false);
++  const [error, setError] = React.useState<string | null>(null);
++
++  async function handleToggle() {
++    const next = !value;
++    setPending(true);
++    setError(null);
++
++    const result = await updateSetting(settingKey, next);
++    if (!result.ok) {
++      setError(result.error ?? "Something went wrong.");
++      setPending(false);
++      return;
++    }
++
++    setValue(next);
++    setPending(false);
++    router.refresh();
++  }
++
++  return (
++    <div className="flex items-start justify-between gap-4 px-5 py-4">
++      <div>
++        <p className="font-medium">{label}</p>
++        <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
++        {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
++      </div>
++
++      <button
++        type="button"
++        role="switch"
++        aria-checked={value}
++        aria-label={label}
++        onClick={handleToggle}
++        disabled={pending}
++        className={cn(
++          "relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50",
++          value ? "bg-primary" : "bg-secondary"
++        )}
++      >
++        <span
++          className={cn(
++            "absolute top-1 h-5 w-5 rounded-full bg-card shadow transition-transform",
++            value ? "translate-x-6" : "translate-x-1"
++          )}
++        />
++      </button>
++    </div>
++  );
++}
+diff --git a/lib/database.types.ts b/lib/database.types.ts
+index 7c74901..f51aef8 100644
+--- a/lib/database.types.ts
++++ b/lib/database.types.ts
+@@ -232,6 +232,30 @@ export interface Database {
+           }
+         ];
+       };
++      app_settings: {
++        Row: {
++          key: string;
++          value: unknown;
++          updated_at: string;
++          updated_by: string | null;
++        };
++        Insert: {
++          key: string;
++          value: unknown;
++          updated_at?: string;
++          updated_by?: string | null;
++        };
++        Update: Partial<Database["public"]["Tables"]["app_settings"]["Insert"]>;
++        Relationships: [
++          {
++            foreignKeyName: "app_settings_updated_by_fkey";
++            columns: ["updated_by"];
++            isOneToOne: false;
++            referencedRelation: "players";
++            referencedColumns: ["id"];
++          }
++        ];
++      };
+     };
+     Views: {};
+     // Functions are intentionally omitted — approve_scorecard/reject_scorecard
+diff --git a/supabase/migrations/0014_app_settings.sql b/supabase/migrations/0014_app_settings.sql
+new file mode 100644
+index 0000000..57b147e
+--- /dev/null
++++ b/supabase/migrations/0014_app_settings.sql
+@@ -0,0 +1,32 @@
++-- 0014_app_settings.sql
++--
++-- A general-purpose, extensible settings store — key/value rather than one
++-- column per setting, specifically so adding the NEXT setting later is an
++-- application-layer change (new key, new UI toggle) rather than a new
++-- migration every time. Worth it here given the explicit goal of this
++-- being reusable beyond one society.
++--
++-- value is jsonb rather than text/boolean so future settings aren't
++-- constrained to booleans — a number, string, or small object all fit
++-- without a schema change.
++
++create table if not exists app_settings (
++  key text primary key,
++  value jsonb not null,
++  updated_at timestamptz not null default now(),
++  updated_by uuid references players(id)
++);
++
++comment on table app_settings is
++  'Extensible application settings, one row per setting key. Read by any authenticated session; written only by admins (enforced in app/actions/settings.ts, not by RLS — see the reasoning in 0007_rls_policies.sql for why this app does authorization in code rather than RLS policies).';
++
++alter table app_settings enable row level security;
++alter table app_settings force row level security;
++revoke all on app_settings from anon, authenticated;
++
++-- Seed the first setting with a default that preserves existing behavior
++-- for any installation that hasn't touched settings yet — players CAN log
++-- their own rounds by default, same as before this feature existed.
++insert into app_settings (key, value)
++values ('players_can_log_own_rounds', 'true'::jsonb)
++on conflict (key) do nothing;

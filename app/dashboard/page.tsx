@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireSession } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { logout } from "@/app/actions/auth";
+import { getAppSettings } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
@@ -10,11 +11,17 @@ export default async function DashboardPage() {
   const session = await requireSession();
   const supabase = createServiceClient();
 
-  const { data: player } = await supabase
-    .from("players")
-    .select("first_name, last_name, current_handicap, role")
-    .eq("id", session.playerId)
-    .single();
+  const [{ data: player }, settings] = await Promise.all([
+    supabase
+      .from("players")
+      .select("first_name, last_name, current_handicap, role")
+      .eq("id", session.playerId)
+      .single(),
+    getAppSettings(),
+  ]);
+
+  const isAdmin = player?.role === "admin";
+  const canLogRounds = isAdmin || settings.playersCanLogOwnRounds;
 
   return (
     <main className="min-h-screen bg-background px-4 py-12">
@@ -34,9 +41,11 @@ export default async function DashboardPage() {
         </div>
 
         <nav className="mb-8 flex flex-wrap gap-2">
-          <Button asChild variant="accent" size="sm">
-            <Link href="/rounds/new">Log a round</Link>
-          </Button>
+          {canLogRounds && (
+            <Button asChild variant="accent" size="sm">
+              <Link href="/rounds/new">Log a round</Link>
+            </Button>
+          )}
           <Button asChild variant="outline" size="sm">
             <Link href={`/players/${session.playerId}`}>My profile</Link>
           </Button>
@@ -46,13 +55,16 @@ export default async function DashboardPage() {
           <Button asChild variant="outline" size="sm">
             <Link href="/players">Members</Link>
           </Button>
-          {player?.role === "admin" && (
+          {isAdmin && (
             <>
               <Button asChild variant="outline" size="sm">
                 <Link href="/admin/approvals">Approvals</Link>
               </Button>
               <Button asChild variant="outline" size="sm">
                 <Link href="/courses">Courses</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/admin/settings">Settings</Link>
               </Button>
             </>
           )}
