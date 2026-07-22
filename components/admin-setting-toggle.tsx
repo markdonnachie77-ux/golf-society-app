@@ -3,7 +3,8 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { updateSetting, type SettingKey } from "@/app/actions/settings";
+import { updateSetting } from "@/app/actions/settings";
+import type { SettingKey } from "@/lib/app-settings";
 
 export function SettingToggle({
   settingKey,

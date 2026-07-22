@@ -547,9 +547,21 @@ A general, extensible settings store — `app_settings` is a plain
 key/value table (`supabase/migrations/0014_app_settings.sql`), not one
 column per setting. Adding the next setting later needs **no new
 migration**: add its key to `SettingKey` and a field to `AppSettings` in
-`app/actions/settings.ts`, add a row to the mapping in `getAppSettings()`,
-and drop a `<SettingToggle>` onto `/admin/settings`'s page. The `value`
-column is `jsonb`, so future settings aren't limited to booleans either.
+`lib/app-settings.ts`, add a row to the mapping in `getAppSettings()`, and
+drop a UI control onto `/admin/settings`'s page (writes still go through
+`updateSetting()` in `app/actions/settings.ts`). The `value` column is
+`jsonb`, so future settings aren't limited to booleans either.
+
+The read (`getAppSettings`) and the writes (`updateSetting` and friends)
+deliberately live in two different files: `getAppSettings` is wrapped in
+React's `cache()` so the several independent calls one request already
+makes (root layout, `generateMetadata`, and whichever page is rendering)
+collapse into a single query, and Next.js requires every export of a
+`"use server"` file to be a plain async function declaration — a
+`cache()`-wrapped function (or a re-export) doesn't qualify and fails the
+build. So `lib/app-settings.ts` has no `"use server"` directive and holds
+just the read; `app/actions/settings.ts` keeps `"use server"` and holds
+only the mutations.
 
 **First setting: "Players can log their own rounds."** Turning it off
 means only admins can log a round — for any player, including their own.
@@ -566,6 +578,34 @@ Only #3 is the actual security boundary — #1 and #2 are UX, not
 protection. If you're auditing this for a security review, that's the one
 line that matters; the rest just avoids showing a form nobody's allowed
 to submit.
+
+**Brand colors.** Admins can customize Primary/Secondary/Accent (the
+three CSS custom properties from `app/globals.css` used throughout the
+UI) per society, stored as hex under the `brand_colors` key. The math
+lives in `lib/color.ts` (pure, unit-tested in
+`lib/__tests__/color.test.ts`) rather than in the component or the
+action:
+- Hex → HSL, since `globals.css`'s variables are HSL triplets
+  (`--primary: 158 45% 22%`)
+- A readable foreground (near-black or near-white) is picked per color via
+  the WCAG relative-luminance formula, so an admin can't accidentally
+  choose a color and end up with unreadable button text — they only ever
+  pick the three base colors, never a foreground
+- A dark-mode-safe variant (lightness clamped into a visible band against
+  the dark theme's background) is derived from the same base color rather
+  than asked for separately — this app has no dark-mode toggle wired up
+  anywhere yet, so today this half is inert, but it's ready the moment one
+  exists
+
+`app/layout.tsx` applies the result: light-mode variables go on the
+`<html>` element's inline `style` (inline style always wins over
+`globals.css`'s `:root` rules, regardless of stylesheet load order),
+dark-mode variables go in a `.dark`-scoped `<style>` tag since there's no
+single element to attach them to directly. Saving `null` (the "Reset to
+default" button) removes the customization entirely rather than storing
+the built-in palette's own values, so the built-in "clubhouse ledger"
+theme in `globals.css` keeps being the single source of truth for
+societies that never touch this setting.
 
 ## Admins logging a round on behalf of a player
 

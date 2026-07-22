@@ -1,7 +1,8 @@
 import { requireAdmin } from "@/lib/auth";
-import { getAppSettings } from "@/app/actions/settings";
+import { getAppSettings } from "@/lib/app-settings";
 import { SettingToggle } from "@/components/admin-setting-toggle";
 import { AdminHeroPhotoSetting } from "@/components/admin-hero-photo-setting";
+import { AdminBrandColorsSetting } from "@/components/admin-brand-colors-setting";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function AdminSettingsPage() {
@@ -28,6 +29,8 @@ export default async function AdminSettingsPage() {
           />
           <div className="ledger-rule" />
           <AdminHeroPhotoSetting currentPhotoUrl={settings.heroPhotoUrl} />
+          <div className="ledger-rule" />
+          <AdminBrandColorsSetting currentColors={settings.brandColors} />
         </div>
       </div>
     </main>

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { listPlayersForLogin } from "@/app/actions/auth";
-import { getAppSettings } from "@/app/actions/settings";
+import { getAppSettings } from "@/lib/app-settings";
 import { LoginForm } from "@/components/login-form";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
