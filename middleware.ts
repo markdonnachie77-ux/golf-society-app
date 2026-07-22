@@ -29,7 +29,7 @@ const ADMIN_PATH_PREFIXES = ["/admin", "/courses"];
 // until that env var is actually configured — an existing single-tenant
 // deployment needs zero changes to keep working exactly as it does today.
 
-const DEFAULT_SOCIETY_SLUG = "evs-golf-society";
+const DEFAULT_SOCIETY_ID = "00000000-0000-0000-0000-000000000001";
 const SOCIETY_HEADER = "x-society-id";
 const SOCIETY_NAME_HEADER = "x-society-name";
 
@@ -48,8 +48,9 @@ interface ResolvedSociety {
 const societyCache = new Map<string, { society: ResolvedSociety | null; expiresAt: number }>();
 const CACHE_TTL_MS = 60_000;
 
-async function lookupSocietyBySlug(slug: string): Promise<ResolvedSociety | null> {
-  const cached = societyCache.get(slug);
+async function fetchSociety(filterColumn: "slug" | "id", filterValue: string): Promise<ResolvedSociety | null> {
+  const cacheKey = `${filterColumn}:${filterValue}`;
+  const cached = societyCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.society;
   }
@@ -60,40 +61,53 @@ async function lookupSocietyBySlug(slug: string): Promise<ResolvedSociety | null
 
   try {
     const response = await fetch(
-      `${url}/rest/v1/societies?slug=eq.${encodeURIComponent(slug)}&select=id,slug,name`,
+      `${url}/rest/v1/societies?${filterColumn}=eq.${encodeURIComponent(filterValue)}&select=id,slug,name`,
       { headers: { apikey: key, Authorization: `Bearer ${key}` } }
     );
     if (!response.ok) return null;
 
     const rows = (await response.json()) as ResolvedSociety[];
     const found = rows[0] ?? null;
-    societyCache.set(slug, { society: found, expiresAt: Date.now() + CACHE_TTL_MS });
+    societyCache.set(cacheKey, { society: found, expiresAt: Date.now() + CACHE_TTL_MS });
     return found;
   } catch {
     return null;
   }
 }
 
-/** Resolves which society a request's hostname belongs to.
- * - "default" — no subdomain present, use the one seeded society
- * - a ResolvedSociety — a real, matched tenant
- * - null — a subdomain WAS present but didn't match any known society;
- *   the caller should reject the request rather than silently falling
- *   back to the default tenant's data. Falling back silently here would
- *   be a real cross-tenant bug waiting to happen — a typo'd or
- *   not-yet-provisioned subdomain must never quietly show someone else's
- *   society instead. */
-/** Resolves which society a request's hostname belongs to, always via the
- * same lookup (a bare/apex/www hostname resolves using the default
- * society's own slug rather than a special-cased shortcut) — this is
- * what makes the society's `name` available uniformly for every request,
- * not just ones with a real tenant subdomain. Returns null only when the
- * resolved slug (real subdomain OR the default) doesn't match any known
- * society — the caller must reject the request rather than silently
- * falling back to a different tenant's data. */
+/**
+ * Resolves which society a request's hostname belongs to.
+ *
+ * A real, recognized tenant subdomain (e.g. ktown.localsociety.club)
+ * resolves by SLUG — that's genuinely the only identifier available for
+ * it. But a bare/apex/www/custom-domain hostname (evsgolfsociety.co.uk,
+ * plain localhost, etc.) resolves by the FIXED, HARDCODED default
+ * society ID instead of by slug — deliberately, not as a shortcut for
+ * "avoid one extra query". Looking that case up by slug instead (as an
+ * earlier version of this function did, purely so the name came from
+ * the same code path as the id) turned a slug mismatch/typo into the
+ * WHOLE SITE 404ing for every hostname that isn't a recognized
+ * subdomain — including the one production domain most likely to be
+ * hit constantly. The fixed UUID can't drift or typo the way a free-text
+ * slug column can, so it's the more resilient thing to depend on for
+ * "this is the fallback path every non-subdomain request takes."
+ *
+ * Returns null only when a REAL subdomain was present but didn't match
+ * any known society — the caller must reject that request rather than
+ * silently falling back to a different tenant's data. That's a
+ * different failure mode from the default-society lookup ever failing:
+ * an unrecognized subdomain not resolving is expected and safe to reject;
+ * the fallback path not resolving would take down every hostname that
+ * isn't a subdomain at all, which is why it doesn't share the same
+ * "fail closed" behavior — it fails toward the one fixed, known-correct
+ * id instead.
+ */
 async function resolveSociety(hostname: string): Promise<ResolvedSociety | null> {
   const subdomain = extractSubdomain(hostname, process.env.PLATFORM_ROOT_DOMAIN);
-  return lookupSocietyBySlug(subdomain ?? DEFAULT_SOCIETY_SLUG);
+  if (!subdomain) {
+    return fetchSociety("id", DEFAULT_SOCIETY_ID);
+  }
+  return fetchSociety("slug", subdomain);
 }
 
 function getSessionSecret(): Uint8Array {
