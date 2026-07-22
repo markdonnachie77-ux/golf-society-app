@@ -389,6 +389,51 @@ nothing is "correct by accident" and every query stands on its own.
   — courses, rounds, approvals, players — genuinely shows only its own
   tenant's data when visited via that tenant's `*.localhost` subdomain.
 
+## Per-society branding: name, not just photo
+
+The hero photo work above left one thing still hardcoded: the "back to
+home" link at the top of every page, the login page's displayed name,
+and the browser tab title / social-preview metadata all read a single
+`SOCIETY_NAME` constant (`lib/branding.ts`, now deleted) — so every
+tenant's pages showed "EVs Golf Society" regardless of which society was
+actually being viewed.
+
+Fixed by reading `societies.name` per-request instead:
+
+- `middleware.ts` now resolves the society's `name` alongside its `id`
+  and forwards it as a second request header (`x-society-name`,
+  URL-encoded — society names are free text and HTTP header values don't
+  safely support arbitrary characters otherwise). This also simplified
+  the resolution logic: a bare/apex/www hostname now resolves through the
+  *same* lookup as a real tenant subdomain, just using the default
+  society's own slug — there's no special-cased "default" sentinel value
+  anymore, which is what made getting the name for free (not just the
+  id) straightforward for every request, not only ones with a real
+  subdomain.
+- `lib/tenant.ts` gained `getCurrentSocietyName()`, reading that header.
+- `components/brand-eyebrow.tsx` and `components/auth-hero-photo.tsx` are
+  now **async Server Components that fetch the name themselves**, rather
+  than requiring every one of the ~12 pages that render `BrandEyebrow` to
+  fetch and pass it down as a prop. This only works because neither
+  component has any client-side interactivity — worth knowing if either
+  ever needs an onClick/onChange added later, since that would force a
+  `"use client"` boundary and break this pattern.
+- `app/layout.tsx`'s metadata is now `generateMetadata()` (async) instead
+  of a static export — title/description use the resolved society name,
+  the social-preview image uses that society's own uploaded hero photo
+  (omitted entirely if they haven't uploaded one, rather than falling
+  back to any hardcoded asset), and `metadataBase` is derived from the
+  actual incoming request's `Host` header rather than a hardcoded EVS
+  URL — this correctly handles both `*.localsociety.club` subdomains and
+  a tenant's own custom domain (like `evsgolfsociety.co.uk`) with no
+  extra per-society configuration needed.
+
+One minor, accepted cost: `generateMetadata` now runs `getAppSettings()`
+on every single page load (for the OG image), which is one extra query
+per page beyond whatever that page's own component already does. Not
+incorrect, just worth knowing if this app's query volume ever needs
+tightening up.
+
 ## Per-society login page photo
 
 `/admin/settings` also has an upload panel for the login/register hero

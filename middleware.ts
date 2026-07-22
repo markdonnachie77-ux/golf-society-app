@@ -29,12 +29,14 @@ const ADMIN_PATH_PREFIXES = ["/admin", "/courses"];
 // until that env var is actually configured — an existing single-tenant
 // deployment needs zero changes to keep working exactly as it does today.
 
-const DEFAULT_SOCIETY_ID = "00000000-0000-0000-0000-000000000001";
+const DEFAULT_SOCIETY_SLUG = "evs-golf-society";
 const SOCIETY_HEADER = "x-society-id";
+const SOCIETY_NAME_HEADER = "x-society-name";
 
 interface ResolvedSociety {
   id: string;
   slug: string;
+  name: string;
 }
 
 // Tiny in-memory cache so repeated requests hitting the same Edge
@@ -58,7 +60,7 @@ async function lookupSocietyBySlug(slug: string): Promise<ResolvedSociety | null
 
   try {
     const response = await fetch(
-      `${url}/rest/v1/societies?slug=eq.${encodeURIComponent(slug)}&select=id,slug`,
+      `${url}/rest/v1/societies?slug=eq.${encodeURIComponent(slug)}&select=id,slug,name`,
       { headers: { apikey: key, Authorization: `Bearer ${key}` } }
     );
     if (!response.ok) return null;
@@ -81,10 +83,17 @@ async function lookupSocietyBySlug(slug: string): Promise<ResolvedSociety | null
  *   be a real cross-tenant bug waiting to happen — a typo'd or
  *   not-yet-provisioned subdomain must never quietly show someone else's
  *   society instead. */
-async function resolveSociety(hostname: string): Promise<ResolvedSociety | "default" | null> {
+/** Resolves which society a request's hostname belongs to, always via the
+ * same lookup (a bare/apex/www hostname resolves using the default
+ * society's own slug rather than a special-cased shortcut) — this is
+ * what makes the society's `name` available uniformly for every request,
+ * not just ones with a real tenant subdomain. Returns null only when the
+ * resolved slug (real subdomain OR the default) doesn't match any known
+ * society — the caller must reject the request rather than silently
+ * falling back to a different tenant's data. */
+async function resolveSociety(hostname: string): Promise<ResolvedSociety | null> {
   const subdomain = extractSubdomain(hostname, process.env.PLATFORM_ROOT_DOMAIN);
-  if (!subdomain) return "default";
-  return lookupSocietyBySlug(subdomain);
+  return lookupSocietyBySlug(subdomain ?? DEFAULT_SOCIETY_SLUG);
 }
 
 function getSessionSecret(): Uint8Array {
@@ -129,20 +138,22 @@ export async function middleware(request: NextRequest) {
   if (resolved === null) {
     return new NextResponse("Society not found", { status: 404 });
   }
-  const societyId = resolved === "default" ? DEFAULT_SOCIETY_ID : resolved.id;
 
-  // Forwarded to every downstream Server Component/Action as a request
-  // header. Using .set() (not .append()) unconditionally overwrites
-  // anything a client tried to send under this name — the resolved value
-  // always wins, a client can't spoof its own tenant by sending this
-  // header directly.
+  // Forwarded to every downstream Server Component/Action as request
+  // headers. Using .set() (not .append()) unconditionally overwrites
+  // anything a client tried to send under these names — the resolved
+  // values always win, a client can't spoof its own tenant by sending
+  // either header directly. The name is URL-encoded since society names
+  // are free-text (set by whoever creates the row) and HTTP header
+  // values don't safely support arbitrary characters.
   const requestHeaders = new Headers(request.headers);
-  requestHeaders.set(SOCIETY_HEADER, societyId);
+  requestHeaders.set(SOCIETY_HEADER, resolved.id);
+  requestHeaders.set(SOCIETY_NAME_HEADER, encodeURIComponent(resolved.name));
   const withTenantHeader = { request: { headers: requestHeaders } };
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const session = await readSession(token, societyId);
+  const session = await readSession(token, resolved.id);
 
   if (isPublic) {
     // Already logged in? Bounce away from login/register to the dashboard.

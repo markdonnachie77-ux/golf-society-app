@@ -1,7 +1,9 @@
 import Image from "next/image";
-import { SOCIETY_NAME } from "@/lib/branding";
+import { getCurrentSocietyName } from "@/lib/tenant";
 
-export function AuthHeroPhoto({ photoUrl }: { photoUrl: string | null }) {
+export async function AuthHeroPhoto({ photoUrl }: { photoUrl: string | null }) {
+  const societyName = await getCurrentSocietyName();
+
   return (
     <div className="hidden flex-1 flex-col items-center justify-center gap-6 bg-primary p-10 md:flex">
       {photoUrl && (
@@ -16,7 +18,7 @@ export function AuthHeroPhoto({ photoUrl }: { photoUrl: string | null }) {
         <div className="relative aspect-[3/2] w-full max-w-lg overflow-hidden rounded-lg border-4 border-accent/70 shadow-lg">
           <Image
             src={photoUrl}
-            alt={`${SOCIETY_NAME} members`}
+            alt={`${societyName} members`}
             fill
             priority
             sizes="(min-width: 768px) 512px, 100vw"
@@ -26,7 +28,7 @@ export function AuthHeroPhoto({ photoUrl }: { photoUrl: string | null }) {
       )}
       <div className="text-center">
         <p className="font-display text-3xl font-semibold text-primary-foreground">
-          {SOCIETY_NAME}
+          {societyName}
         </p>
         <p className="mt-1 text-sm text-primary-foreground/80">
           Handicaps, scorecards, and society history — all in one place.

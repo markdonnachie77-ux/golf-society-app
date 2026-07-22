@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Fraunces, Work_Sans, JetBrains_Mono } from "next/font/google";
-import { SOCIETY_NAME } from "@/lib/branding";
+import { headers } from "next/headers";
+import { getCurrentSocietyName } from "@/lib/tenant";
+import { getAppSettings } from "@/app/actions/settings";
 import "./globals.css";
 
 const display = Fraunces({
@@ -21,16 +23,49 @@ const mono = JetBrains_Mono({
   weight: ["500", "600"],
 });
 
-export const metadata: Metadata = {
-  metadataBase: new URL("https://evsgolfsociety.co.uk"),
-  title: SOCIETY_NAME,
-  description: `${SOCIETY_NAME} handicap tracking & scorecards`,
-  openGraph: {
-    title: SOCIETY_NAME,
-    description: `${SOCIETY_NAME} handicap tracking & scorecards`,
-    images: ["/branding/society-photo.png"],
-  },
-};
+/**
+ * Async, not a static export — the browser tab title, the OG title/
+ * description used for social link previews, and metadataBase all used
+ * to be hardcoded to EVS specifically (name, and a literal
+ * "evsgolfsociety.co.uk" URL). Every tenant's login page, when shared as
+ * a link, would show "EVs Golf Society" and resolve relative asset paths
+ * against EVS's own domain regardless of which society's link it
+ * actually was.
+ *
+ * metadataBase is derived from the actual incoming request's Host header
+ * rather than any stored per-society "domain" field — this correctly
+ * handles every case (a *.localsociety.club subdomain, or a tenant's own
+ * custom domain like evsgolfsociety.co.uk) with no extra configuration
+ * needed per society.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const [societyName, settings, headersList] = await Promise.all([
+    getCurrentSocietyName(),
+    getAppSettings(),
+    headers(),
+  ]);
+
+  const host = headersList.get("host") ?? "localhost:3000";
+  const protocol = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
+  const metadataBase = new URL(`${protocol}://${host}`);
+
+  const description = `${societyName} handicap tracking & scorecards`;
+
+  return {
+    metadataBase,
+    title: societyName,
+    description,
+    openGraph: {
+      title: societyName,
+      description,
+      // Omitted entirely (rather than falling back to any hardcoded
+      // asset) when this society hasn't uploaded a hero photo — a
+      // missing/broken preview image is a smaller problem than showing
+      // a photo of a completely different society's members.
+      ...(settings.heroPhotoUrl ? { images: [settings.heroPhotoUrl] } : {}),
+    },
+  };
+}
 
 // Every page in this app reads live session state (who's logged in) and/or
 // live database data (player lists, handicaps, pending approvals) via
