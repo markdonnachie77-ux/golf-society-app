@@ -389,6 +389,45 @@ nothing is "correct by accident" and every query stands on its own.
   — courses, rounds, approvals, players — genuinely shows only its own
   tenant's data when visited via that tenant's `*.localhost` subdomain.
 
+## A real production outage, and what it taught
+
+The per-society-branding fix above initially changed how a non-subdomain
+hostname (a tenant's own custom domain, plain `localhost`, anything not
+matching the platform root domain) resolves — instead of using a fixed,
+hardcoded society ID, it started looking up the default society **by
+slug**, purely so the display name could come from the same query as the
+id. This took `evsgolfsociety.co.uk` down in production: the slug lookup
+found nothing, and the whole site 404'd for every hostname that wasn't a
+recognized subdomain — including the one production domain guaranteed to
+get hit constantly.
+
+Two things got fixed, not just the one that caused the outage:
+
+1. **The default-society fallback resolves by fixed ID again**, not
+   slug. A hardcoded UUID can't drift or typo the way a free-text column
+   can — `middleware.ts`'s `resolveSociety` now only uses a slug lookup
+   for a *real, recognized* tenant subdomain, where "not found" is a
+   legitimate, expected outcome the caller should reject. The
+   fallback path fails toward one fixed, known-correct id instead.
+2. **Negative results are no longer cached for that fallback lookup.**
+   Before this, if the default-society lookup failed for *any* transient
+   reason (a network blip, a momentary Supabase hiccup), that failure got
+   cached for a full minute — meaning the whole site would've stayed
+   down even after the underlying cause resolved itself. Caching a
+   genuine "this subdomain doesn't exist" for a real tenant lookup is
+   still fine and intentional; caching "the one fixed fallback id
+   momentarily failed to resolve" is not.
+
+The broader lesson, worth remembering for any future change to this
+resolution logic specifically: it's tempting to unify two code paths
+(the default case and the real-subdomain case) for the sake of getting
+one extra piece of data "for free" from the same query. Here that
+elegance came at the cost of removing a resilience property (a fixed,
+undriftable identifier for the one path that MUST always resolve) that
+existed for a real reason. Any future change here should ask explicitly:
+does this still keep the default-society path independent of anything
+that could plausibly be wrong, missing, or mistyped?
+
 ## Per-society branding: name, not just photo
 
 The hero photo work above left one thing still hardcoded: the "back to

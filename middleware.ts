@@ -68,7 +68,22 @@ async function fetchSociety(filterColumn: "slug" | "id", filterValue: string): P
 
     const rows = (await response.json()) as ResolvedSociety[];
     const found = rows[0] ?? null;
-    societyCache.set(cacheKey, { society: found, expiresAt: Date.now() + CACHE_TTL_MS });
+
+    // Only cache a NOT-FOUND result for a slug lookup — an unrecognized
+    // subdomain not existing is a genuine, expected, stable outcome worth
+    // caching briefly. For the id-based default-society lookup, a null
+    // here almost always means something transient went wrong (a
+    // momentary network blip, a Supabase hiccup) rather than "this fixed
+    // id genuinely doesn't exist" — caching that would mean the entire
+    // site stays down for the rest of the cache window even after
+    // whatever caused it resolves itself. This is exactly the failure
+    // mode that took evsgolfsociety.co.uk down once already; a transient
+    // failure here should be retried on the very next request, not
+    // frozen for up to CACHE_TTL_MS.
+    if (found !== null || filterColumn === "slug") {
+      societyCache.set(cacheKey, { society: found, expiresAt: Date.now() + CACHE_TTL_MS });
+    }
+
     return found;
   } catch {
     return null;
