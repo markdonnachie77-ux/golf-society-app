@@ -389,6 +389,28 @@ nothing is "correct by accident" and every query stands on its own.
   — courses, rounds, approvals, players — genuinely shows only its own
   tenant's data when visited via that tenant's `*.localhost` subdomain.
 
+## Dashboard gross score stats
+
+Every player's dashboard now shows their average gross score and best
+round, split by 9 vs 18 holes (a 9-hole total and an 18-hole total aren't
+comparable, so they're never averaged together).
+
+Two judgment calls worth knowing about:
+- **Only approved rounds count.** Pending/rejected aren't a verified
+  score yet.
+- **A round with any picked-up hole is excluded entirely**, not just from
+  the average but from "best round" too. A picked-up hole means
+  `total_gross_stroke_play` only sums the completed holes (see
+  `lib/golf-math.ts`'s `summarizeRound`), so it's a partial total, not a
+  real, comparable score — including it risked showing an incomplete
+  round as someone's "best," which would be actively misleading rather
+  than just imprecise.
+
+This uses gross strokes specifically (not Stableford points), per an
+explicit choice — the app's main scoring format is Stableford, so this
+was worth confirming rather than assuming, since the two tell genuinely
+different stories about a round.
+
 ## A real production outage, and what it taught
 
 The per-society-branding fix above initially changed how a non-subdomain

@@ -3,17 +3,19 @@ import { requireSession } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
 import { getAppSettings } from "@/app/actions/settings";
+import { getPlayerGrossScoreStats } from "@/app/actions/players";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 import { LogoutButton } from "@/components/logout-button";
+import { GrossScoreStatsCard } from "@/components/gross-score-stats-card";
 
 export default async function DashboardPage() {
   const session = await requireSession();
   const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
-  const [{ data: player }, settings] = await Promise.all([
+  const [{ data: player }, settings, grossScoreStats] = await Promise.all([
     supabase
       .from("players")
       .select("first_name, last_name, current_handicap, role")
@@ -21,6 +23,7 @@ export default async function DashboardPage() {
       .eq("society_id", societyId)
       .single(),
     getAppSettings(),
+    getPlayerGrossScoreStats(session.playerId),
   ]);
 
   const isAdmin = player?.role === "admin";
@@ -80,6 +83,8 @@ export default async function DashboardPage() {
             </span>
           </CardContent>
         </Card>
+
+        <GrossScoreStatsCard stats={grossScoreStats} />
       </div>
     </main>
   );

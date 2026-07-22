@@ -188,3 +188,103 @@ export async function wipePlayerHistory(playerId: string): Promise<ActionResult>
 
   return { ok: true };
 }
+
+// ---------- Gross score stats (dashboard) ----------
+
+export interface BestRound {
+  scorecardId: string;
+  grossScore: number;
+  courseName: string;
+  playedAt: string;
+}
+
+export interface GrossScoreCategory {
+  average: number | null;
+  best: BestRound | null;
+  roundCount: number;
+}
+
+export interface GrossScoreStats {
+  nineHole: GrossScoreCategory;
+  eighteenHole: GrossScoreCategory;
+}
+
+const EMPTY_CATEGORY: GrossScoreCategory = { average: null, best: null, roundCount: 0 };
+
+interface RawScorecardRow {
+  id: string;
+  round_type: string;
+  total_gross_stroke_play: number | null;
+  played_at: string;
+  courses: { name: string } | null;
+}
+
+function summarizeGrossScores(rows: RawScorecardRow[]): GrossScoreCategory {
+  if (rows.length === 0) return { ...EMPTY_CATEGORY };
+
+  const total = rows.reduce((sum, r) => sum + (r.total_gross_stroke_play ?? 0), 0);
+  const average = Math.round((total / rows.length) * 10) / 10;
+
+  const best = rows.reduce((lowest, r) =>
+    (r.total_gross_stroke_play ?? Infinity) < (lowest.total_gross_stroke_play ?? Infinity) ? r : lowest
+  );
+
+  return {
+    average,
+    roundCount: rows.length,
+    best: {
+      scorecardId: best.id,
+      grossScore: best.total_gross_stroke_play!,
+      courseName: best.courses?.name ?? "Unknown course",
+      playedAt: best.played_at,
+    },
+  };
+}
+
+/**
+ * Gross-score average and best round, split by 9 vs 18 holes (a 9-hole
+ * total and an 18-hole total aren't comparable, so lumping them together
+ * would be meaningless). Only approved rounds count — pending/rejected
+ * aren't a real, verified score yet. Rounds with ANY picked-up hole are
+ * excluded entirely: a picked-up hole means total_gross_stroke_play only
+ * sums the completed holes (see lib/golf-math.ts's summarizeRound), so
+ * it's a partial total, not a real comparable score — including it could
+ * make an incomplete round look like someone's best round.
+ */
+export async function getPlayerGrossScoreStats(playerId: string): Promise<GrossScoreStats> {
+  await requireSession();
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
+
+  const { data: scorecards } = await supabase
+    .from("scorecards")
+    .select("id, round_type, total_gross_stroke_play, played_at, courses(name)")
+    .eq("player_id", playerId)
+    .eq("society_id", societyId)
+    .eq("status", "approved");
+
+  if (!scorecards || scorecards.length === 0) {
+    return { nineHole: { ...EMPTY_CATEGORY }, eighteenHole: { ...EMPTY_CATEGORY } };
+  }
+
+  const rows = scorecards as unknown as RawScorecardRow[];
+  const scorecardIds = rows.map((r) => r.id);
+
+  const { data: pickedUpRows } = await supabase
+    .from("scores")
+    .select("scorecard_id")
+    .in("scorecard_id", scorecardIds)
+    .eq("picked_up", true);
+
+  const excludedIds = new Set((pickedUpRows ?? []).map((r) => r.scorecard_id));
+
+  const complete = rows.filter((r) => !excludedIds.has(r.id) && r.total_gross_stroke_play !== null);
+
+  const nineHoleRows = complete.filter((r) => r.round_type === "front_9" || r.round_type === "back_9");
+  const eighteenHoleRows = complete.filter((r) => r.round_type === "full_18");
+
+  return {
+    nineHole: summarizeGrossScores(nineHoleRows),
+    eighteenHole: summarizeGrossScores(eighteenHoleRows),
+  };
+}
