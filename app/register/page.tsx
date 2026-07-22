@@ -1,5 +1,5 @@
 import { RegisterForm } from "@/components/register-form";
-import { getAppSettings } from "@/app/actions/settings";
+import { getAppSettings } from "@/lib/app-settings";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 import { AuthHeroPhoto } from "@/components/auth-hero-photo";

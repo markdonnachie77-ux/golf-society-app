@@ -8,7 +8,7 @@ import { getCurrentSocietyId } from "@/lib/tenant";
 import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
 import { filterHolesForRoundType } from "@/lib/round-setup";
 import type { ActionResult } from "@/app/actions/auth";
-import { getAppSettings } from "@/app/actions/settings";
+import { getAppSettings } from "@/lib/app-settings";
 
 // ---------- Course/hole lookups used while building the scorecard form ----------
 

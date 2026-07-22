@@ -3,71 +3,19 @@
 import { requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
+import { isValidBrandColors, type BrandColors } from "@/lib/color";
+import type { SettingKey } from "@/lib/app-settings";
 import type { ActionResult } from "@/app/actions/auth";
 
-/**
- * Known setting keys. Adding a new setting means: add its key here, add a
- * field + default to AppSettings/DEFAULTS below, and add a row for it in
- * getAppSettings' mapping. No migration needed — app_settings is a plain
- * key/value table (see 0014_app_settings.sql, re-keyed per-society in
- * 0015_future_proof_multi_tenancy.sql) — just insert/update a row.
- */
-export type SettingKey = "players_can_log_own_rounds" | "hero_photo_url";
-
-export interface AppSettings {
-  /** When false, only admins can log rounds — for a player, even their
-   * own. Admins logging on behalf of another player are never affected
-   * by this setting either way. */
-  playersCanLogOwnRounds: boolean;
-  /** Public URL of this society's login/register hero photo, or null if
-   * they haven't uploaded one — in which case the hero panel renders
-   * without a photo entirely (see components/auth-hero-photo.tsx), not a
-   * fallback to any other society's image. */
-  heroPhotoUrl: string | null;
-}
-
-const DEFAULTS: AppSettings = {
-  playersCanLogOwnRounds: true,
-  heroPhotoUrl: null,
-};
-
-/**
- * Deliberately NOT gated behind requireSession() — settings need to be
- * readable by a logged-out visitor, specifically so the login/register
- * pages can show this society's hero photo before anyone has
- * authenticated. Nothing stored here is sensitive (a boolean toggle and
- * a public photo URL), so this is safe to expose without a session.
- * Writing settings still requires admin — see updateSetting below.
- */
-export async function getAppSettings(): Promise<AppSettings> {
-  const societyId = await getCurrentSocietyId();
-  const supabase = createServiceClient();
-
-  // app_settings' primary key is (society_id, key) as of
-  // 0015_future_proof_multi_tenancy.sql — without this filter, every
-  // society's settings rows would come back mixed together, and the
-  // byKey map below would end up keyed only by `key`, silently picking
-  // up whichever society's row happened to arrive for it.
-  const { data, error } = await supabase
-    .from("app_settings")
-    .select("key, value")
-    .eq("society_id", societyId);
-
-  if (error || !data) return { ...DEFAULTS };
-
-  const byKey = new Map(data.map((row) => [row.key, row.value]));
-
-  return {
-    playersCanLogOwnRounds:
-      (byKey.get("players_can_log_own_rounds") as boolean | undefined) ??
-      DEFAULTS.playersCanLogOwnRounds,
-    heroPhotoUrl: (byKey.get("hero_photo_url") as string | undefined) ?? DEFAULTS.heroPhotoUrl,
-  };
-}
+// The read-only fetch (getAppSettings) lives in lib/app-settings.ts, not
+// here — Next.js requires every export of a "use server" file to be an
+// async function declaration, which rules out both a cache()-wrapped
+// function and a re-export. Import getAppSettings/AppSettings/SettingKey
+// from "@/lib/app-settings" directly rather than from this file.
 
 export async function updateSetting(
   key: SettingKey,
-  value: boolean | string | null
+  value: boolean | string | BrandColors | null
 ): Promise<ActionResult> {
   const session = await requireAdmin();
   const societyId = await getCurrentSocietyId();
@@ -96,6 +44,24 @@ export async function updateSetting(
   }
 
   return { ok: true };
+}
+
+// ---------- Brand colors ----------
+
+/**
+ * Validates before writing even though updateSetting's caller here is
+ * typed to BrandColors | null — `value` still arrives from a client
+ * component's fetch/serialization boundary, so a malformed payload (a
+ * missing key, a non-hex string) must be rejected here rather than trusted
+ * and later crashing app/layout.tsx's CSS-variable derivation for every
+ * visitor to this society, not just the admin who saved it.
+ */
+export async function updateBrandColors(colors: BrandColors | null): Promise<ActionResult> {
+  if (colors !== null && !isValidBrandColors(colors)) {
+    return { ok: false, error: "Invalid color values." };
+  }
+
+  return updateSetting("brand_colors", colors);
 }
 
 // ---------- Hero photo upload ----------

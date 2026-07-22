@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Fraunces, Work_Sans, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import { getCurrentSocietyName } from "@/lib/tenant";
-import { getAppSettings } from "@/app/actions/settings";
+import { getAppSettings } from "@/lib/app-settings";
+import { buildBrandCssVariables } from "@/lib/color";
 import "./globals.css";
 
 const display = Fraunces({
@@ -81,13 +82,43 @@ export async function generateMetadata(): Promise<Metadata> {
 // page.tsx.
 export const dynamic = "force-dynamic";
 
-export default function RootLayout({
+/**
+ * Per-society brand colors (Primary/Secondary/Accent, set at
+ * /admin/settings) are applied here rather than in globals.css, since
+ * globals.css is one static file shared by every tenant. Light-mode
+ * values go on the <html> element's inline `style` so they win over the
+ * stylesheet's :root defaults unconditionally (inline style always beats
+ * an external/embedded stylesheet, regardless of load order). Dark-mode
+ * values go in a `.dark`-scoped <style> tag instead, since there's no
+ * single element to attach them to directly — harmless that this app has
+ * no dark-mode toggle wired up yet (see globals.css's dormant `.dark`
+ * rules): the override just sits inert alongside them until one exists.
+ */
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const settings = await getAppSettings();
+  const brandCss = settings.brandColors ? buildBrandCssVariables(settings.brandColors) : null;
+
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
+    <html
+      lang="en"
+      className={`${display.variable} ${body.variable} ${mono.variable}`}
+      style={brandCss?.light as React.CSSProperties}
+    >
+      {brandCss && (
+        <head>
+          <style
+            dangerouslySetInnerHTML={{
+              __html: `.dark{${Object.entries(brandCss.dark)
+                .map(([prop, value]) => `${prop}:${value};`)
+                .join("")}}`,
+            }}
+          />
+        </head>
+      )}
       <body>{children}</body>
     </html>
   );

@@ -3,7 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
 import { listCoursesForRound } from "@/app/actions/scorecards";
 import { listAllPlayers } from "@/app/actions/players";
-import { getAppSettings } from "@/app/actions/settings";
+import { getAppSettings } from "@/lib/app-settings";
 import { NewScorecardForm } from "@/components/new-scorecard-form";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
