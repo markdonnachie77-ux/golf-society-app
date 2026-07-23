@@ -15,7 +15,7 @@ import type { ActionResult } from "@/app/actions/auth";
 
 export async function updateSetting(
   key: SettingKey,
-  value: boolean | string | BrandColors | null
+  value: boolean | string | BrandColors
 ): Promise<ActionResult> {
   const session = await requireAdmin();
   const societyId = await getCurrentSocietyId();
@@ -46,6 +46,31 @@ export async function updateSetting(
   return { ok: true };
 }
 
+/**
+ * Removes a setting row entirely rather than writing a null `value` —
+ * app_settings.value is `not null` (0014_app_settings.sql), so a setting
+ * with no override is represented by the row being absent, not by a null
+ * value in it. getAppSettings() already falls back to DEFAULTS for any
+ * key with no row, so deleting is the correct "reset to default."
+ */
+export async function deleteSetting(key: SettingKey): Promise<ActionResult> {
+  await requireAdmin();
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
+
+  const { error } = await supabase
+    .from("app_settings")
+    .delete()
+    .eq("society_id", societyId)
+    .eq("key", key);
+
+  if (error) {
+    return { ok: false, error: error.message || "Could not reset this setting." };
+  }
+
+  return { ok: true };
+}
+
 // ---------- Brand colors ----------
 
 /**
@@ -57,7 +82,11 @@ export async function updateSetting(
  * visitor to this society, not just the admin who saved it.
  */
 export async function updateBrandColors(colors: BrandColors | null): Promise<ActionResult> {
-  if (colors !== null && !isValidBrandColors(colors)) {
+  if (colors === null) {
+    return deleteSetting("brand_colors");
+  }
+
+  if (!isValidBrandColors(colors)) {
     return { ok: false, error: "Invalid color values." };
   }
 
