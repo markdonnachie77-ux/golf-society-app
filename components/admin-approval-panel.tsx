@@ -56,10 +56,14 @@ export function AdminApprovalPanel({
 
       <div className="mt-4 space-y-1.5">
         <Label htmlFor="appliedChange">Handicap change to apply</Label>
+        {/* type="text" + inputMode="decimal" instead of type="number" —
+            see the comment on the playing handicap input in
+            new-scorecard-form.tsx for why. Can be negative (a cut) or
+            positive (an increase), so no digit-only filter. */}
         <Input
           id="appliedChange"
-          type="number"
-          step="0.01"
+          type="text"
+          inputMode="decimal"
           value={appliedChange}
           onChange={(e) => setAppliedChange(e.target.value)}
           disabled={pending !== null}

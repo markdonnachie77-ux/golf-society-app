@@ -110,11 +110,13 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
       <div className="grid gap-5 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="cutRate">Handicap cut rate (per point over target)</Label>
+          {/* type="text" + inputMode="decimal" instead of type="number" —
+              see the comment on the playing handicap input in
+              new-scorecard-form.tsx for why. */}
           <Input
             id="cutRate"
-            type="number"
-            step="0.01"
-            min="0"
+            type="text"
+            inputMode="decimal"
             value={cutRate}
             onChange={(e) => setCutRate(e.target.value)}
             required
@@ -124,9 +126,8 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
           <Label htmlFor="increaseRate">Handicap increase rate (per point under target)</Label>
           <Input
             id="increaseRate"
-            type="number"
-            step="0.01"
-            min="0"
+            type="text"
+            inputMode="decimal"
             value={increaseRate}
             onChange={(e) => setIncreaseRate(e.target.value)}
             required
@@ -164,38 +165,44 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
                   onChange={(par) => updateHole(index, { par })}
                   disabled={pending}
                 />
+                {/* type="text" + inputMode="numeric" + pattern instead
+                    of type="number" — see the comment on the score
+                    input in new-scorecard-form.tsx for why. Digit-only
+                    filter replaces the min/max validation type="number"
+                    gave for free. */}
                 <Input
-                  type="number"
-                  min={1}
-                  max={holeCount}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={hole.strokeIndex || ""}
-                  onChange={(e) =>
-                    updateHole(index, { strokeIndex: Number(e.target.value) || 0 })
-                  }
+                  onChange={(e) => {
+                    const digitsOnly = e.target.value.replace(/[^0-9]/g, "");
+                    updateHole(index, { strokeIndex: Number(digitsOnly) || 0 });
+                  }}
                   className="font-numeral"
                   disabled={pending}
                 />
                 <Input
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={hole.whiteYards ?? ""}
-                  onChange={(e) =>
-                    updateHole(index, {
-                      whiteYards: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
+                  onChange={(e) => {
+                    const digitsOnly = e.target.value.replace(/[^0-9]/g, "");
+                    updateHole(index, { whiteYards: digitsOnly ? Number(digitsOnly) : null });
+                  }}
                   className="font-numeral"
                   disabled={pending}
                 />
                 <Input
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={hole.yellowYards ?? ""}
-                  onChange={(e) =>
-                    updateHole(index, {
-                      yellowYards: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
+                  onChange={(e) => {
+                    const digitsOnly = e.target.value.replace(/[^0-9]/g, "");
+                    updateHole(index, { yellowYards: digitsOnly ? Number(digitsOnly) : null });
+                  }}
                   className="font-numeral"
                   disabled={pending}
                 />

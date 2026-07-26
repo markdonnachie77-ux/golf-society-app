@@ -112,10 +112,13 @@ export function RegisterForm() {
 
         <div className="space-y-1.5">
           <Label htmlFor="initialHandicap">Initial handicap</Label>
+          {/* type="text" + inputMode="decimal" instead of type="number"
+              — see the comment on the playing handicap input in
+              new-scorecard-form.tsx for why. */}
           <Input
             id="initialHandicap"
-            type="number"
-            step="0.1"
+            type="text"
+            inputMode="decimal"
             placeholder="e.g. 18.4"
             value={initialHandicap}
             onChange={(e) => setInitialHandicap(e.target.value)}

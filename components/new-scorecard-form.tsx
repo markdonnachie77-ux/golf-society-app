@@ -128,7 +128,10 @@ export function NewScorecardForm({
     holes.every((h) => {
       if (pickedUpByHole[h.id]) return true;
       const v = Number(grossByHole[h.id]);
-      return Number.isInteger(v) && v >= 1;
+      // Both bounds checked explicitly now — type="text" doesn't give a
+      // free native max the way type="number" used to (min was already
+      // never enforced natively either, this was already JS-checked).
+      return Number.isInteger(v) && v >= 1 && v <= 20;
     });
 
   const preview = React.useMemo(() => {
@@ -279,10 +282,22 @@ export function NewScorecardForm({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="playingHandicap">Playing handicap</Label>
+              {/* type="text" + inputMode="decimal" instead of
+                  type="number" — inputs of type="number" have known,
+                  documented mobile reliability issues (e.g. Chrome
+                  silently discarding input in some cases; some Android
+                  keyboard apps failing to register keypresses at all,
+                  reported here as working in landscape but not
+                  portrait). This is the pattern GOV.UK's frontend team
+                  adopted after hitting the same class of bug — no
+                  digit-only filter here since a handicap can be
+                  negative (a "plus" handicap) and needs a decimal
+                  point, unlike the integer-only per-hole score inputs
+                  below. */}
               <Input
                 id="playingHandicap"
-                type="number"
-                step="0.1"
+                type="text"
+                inputMode="decimal"
                 value={playingHandicap}
                 onChange={(e) => setPlayingHandicap(e.target.value)}
                 required
@@ -333,14 +348,21 @@ export function NewScorecardForm({
                     ) : (
                       <>
                         <Input
-                          type="number"
-                          min={1}
-                          max={20}
+                          type="text"
                           inputMode="numeric"
+                          pattern="[0-9]*"
                           value={grossByHole[hole.id] ?? ""}
-                          onChange={(e) =>
-                            setGrossByHole((prev) => ({ ...prev, [hole.id]: e.target.value }))
-                          }
+                          onChange={(e) => {
+                            // type="text" (not "number") deliberately —
+                            // see the comment on the playing handicap
+                            // input above for why. Filtering to digits
+                            // here replaces the min/max validation a
+                            // type="number" input would have given for
+                            // free, since those attributes don't apply
+                            // to type="text".
+                            const digitsOnly = e.target.value.replace(/[^0-9]/g, "");
+                            setGrossByHole((prev) => ({ ...prev, [hole.id]: digitsOnly }));
+                          }}
                           disabled={pending}
                           className="font-numeral w-full min-w-0"
                         />

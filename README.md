@@ -389,6 +389,44 @@ nothing is "correct by accident" and every query stands on its own.
   — courses, rounds, approvals, players — genuinely shows only its own
   tenant's data when visited via that tenant's `*.localhost` subdomain.
 
+## Mobile bug: numbers not registering on some phones in portrait
+
+Reported symptom: on some phones, tapping a score box brought up the
+numeric keyboard correctly, but pressing a number key did nothing — and
+switching to landscape fixed it. That orientation-specific pattern was
+the key clue: mobile browsers' viewport *width* is what changes between
+portrait/landscape, and this matches a known, longstanding class of bug
+with `<input type="number">` on mobile — Chrome silently discarding
+input in some cases, and various Android keyboard apps failing to
+register keypresses into number inputs at all. Verified against GOV.UK's
+frontend team's own account of hitting and fixing this exact bug class
+(they moved their date-input fields away from `type="number"` for the
+same reason).
+
+**Fix: every numeric input in the app now uses `type="text"` with
+`inputMode="numeric"` or `inputMode="decimal"`, not `type="number"`.**
+This is the documented, battle-tested mitigation — GOV.UK Frontend ships
+it in production across UK government services. Two variants, applied
+based on what each field actually needs:
+
+- **Integer fields** (hole scores, stroke index, yardage): `inputMode="numeric"`
+  + `pattern="[0-9]*"` + an `onChange` filter stripping anything that
+  isn't a digit. `type="number"`'s native `min`/`max` no longer apply to
+  a text input, so those bounds are now enforced purely in JS — worth
+  knowing if a similar integer field gets added later and the min/max
+  isn't obviously duplicated into the validation logic.
+- **Decimal fields** (handicaps, course cut/increase rates): `inputMode="decimal"`,
+  no digit-only filter, since these can be negative (a "plus" handicap)
+  and need a decimal point — validated via `Number()`/`Number.isNaN()`
+  the same way they already were.
+
+This couldn't be reproduced directly (no physical device testing
+available in the environment this was built in) — the fix is applied
+with high confidence given it's a well-documented, authoritative pattern
+matching the exact reported symptom, but it's worth explicit confirmation
+from the affected users' actual phones once deployed, not just assumed
+fixed.
+
 ## Dashboard gross score stats
 
 Every player's dashboard now shows their average gross score and best

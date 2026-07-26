@@ -65,10 +65,13 @@ export function AdminHandicapPanel({
       <div className="mt-4 flex flex-wrap items-end gap-4">
         <div className="space-y-1.5">
           <Label htmlFor="newHandicap">New handicap</Label>
+          {/* type="text" + inputMode="decimal" instead of type="number"
+              — see the comment on the playing handicap input in
+              new-scorecard-form.tsx for why. */}
           <Input
             id="newHandicap"
-            type="number"
-            step="0.1"
+            type="text"
+            inputMode="decimal"
             value={newHandicap}
             onChange={(e) => setNewHandicap(e.target.value)}
             disabled={pending}
