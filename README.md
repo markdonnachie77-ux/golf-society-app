@@ -427,6 +427,38 @@ matching the exact reported symptom, but it's worth explicit confirmation
 from the affected users' actual phones once deployed, not just assumed
 fixed.
 
+**Update: that wasn't the actual root cause.** The `type="text"` +
+`inputMode` change above was a legitimate, worthwhile fix for a real
+class of bug — but testing afterward showed digits were still failing to
+appear, and the person testing it did something genuinely useful: they
+found the failure was tied to **browser zoom level**, not orientation
+directly — above roughly 110% zoom, the digit stopped appearing,
+regardless of portrait/landscape, and landscape only "fixed" it because
+it happened to give the layout enough room again at the same zoom
+percentage.
+
+The real cause: the score input sat in a flex row next to a "Pick up"
+button, styled `min-w-0` (input) beside `shrink-0` (button). `min-w-0`
+means literally no minimum width — as the row's available space shrinks
+(which is exactly what browser zoom does to a fixed physical screen: more
+physical pixels are needed per CSS pixel, so less CSS-pixel space fits),
+the input has nothing stopping it from shrinking all the way to zero
+while the button holds its size. Past a certain zoom level, the input
+collapses to an invisible sliver — the digit genuinely was being typed
+into it the whole time (which is exactly why the earlier keyboard-focused
+fix didn't help), there was just no visible box left to show it in.
+
+**Fix: `min-w-0` → `min-w-[3rem]`** on the score input specifically — a
+real floor it can never shrink below. If a row's total content genuinely
+can't fit (an extreme zoom level, say), it now overflows into the
+horizontal scroll already set up on this grid's wrapper, rather than
+silently collapsing the input to nothing. Checked the rest of the
+codebase for the same pattern (`min-w-0` on an interactive element
+sitting next to a non-shrinking sibling) — the one other `min-w-0` usage
+found is on a text label with `truncate`, which is the safe, correct use
+of the pattern (graceful ellipsis, not a collapsing interactive
+element), not something that needed the same fix.
+
 ## Dashboard gross score stats
 
 Every player's dashboard now shows their average gross score and best

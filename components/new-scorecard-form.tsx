@@ -364,7 +364,7 @@ export function NewScorecardForm({
                             setGrossByHole((prev) => ({ ...prev, [hole.id]: digitsOnly }));
                           }}
                           disabled={pending}
-                          className="font-numeral w-full min-w-0"
+                          className="font-numeral w-full min-w-[3rem]"
                         />
                         <button
                           type="button"
