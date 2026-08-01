@@ -459,27 +459,34 @@ found is on a text label with `truncate`, which is the safe, correct use
 of the pattern (graceful ellipsis, not a collapsing interactive
 element), not something that needed the same fix.
 
-## Rounds feed pagination
+## Rounds feed: pagination and filtering
 
-`/rounds` is now paginated — 20 per page — instead of the earlier flat
-cap-at-50 with no way to see anything before it. Real pagination via
-Supabase's `.range()`, with `{ count: "exact" }` on the same query to get
-a total row count alongside the page of results, rather than a separate
-count query.
+`/rounds` is paginated (20 per page) and filterable by player and/or
+course, both via plain `?page=N&player=<id>&course=<id>` query params —
+same URL-is-the-source-of-truth approach for both, not client-side state.
+That matters together, not just individually: `PaginationControls`
+carries the active filters into its Previous/Next links via an
+`extraParams` prop, so paging forward on a filtered view doesn't silently
+drop the filter. Changing a filter always navigates back to page 1
+(`components/rounds-filter-bar.tsx`), since a different filter means a
+different total page count.
 
-Pages are plain `?page=N` URLs via real `<Link>`s
-(`components/pagination-controls.tsx`), not client-side state — they
-stay directly navigable, shareable, and work without JS. `listSocietyRounds`
-guards against a garbage page value (someone hand-editing the URL) by
-falling back to page 1 rather than passing a negative/non-integer offset
-into the query.
+Real pagination via Supabase's `.range()`, with `{ count: "exact" }` on
+the same query to get a total row count alongside the page of results,
+rather than a separate count query — this replaced an earlier flat
+cap-at-50 with no way to see anything before it.
 
-Only `/rounds` got this — `/admin/approvals`, `/players`, and `/courses`
-are still flat lists. Approvals in particular is a short, actively-managed
-queue (items leave it as soon as they're reviewed), so it's much less
-likely to grow the way a permanent historical feed does — worth
-revisiting if any of the others ever actually need it, not built
-preemptively.
+The two filter dropdowns reuse `listAllPlayers()` and
+`listCoursesForRound()` — both already open to any logged-in society
+member, not admin-gated, which matters here since any player (not just
+admins) can filter the shared rounds feed.
+
+Only `/rounds` has pagination or filtering — `/admin/approvals`,
+`/players`, and `/courses` are still flat lists. Approvals in particular
+is a short, actively-managed queue (items leave it as soon as they're
+reviewed), so it's much less likely to grow the way a permanent
+historical feed does — worth revisiting if any of the others ever
+actually need it, not built preemptively.
 
 ## Dashboard gross score stats
 

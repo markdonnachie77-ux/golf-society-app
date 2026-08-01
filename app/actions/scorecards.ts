@@ -354,7 +354,12 @@ const ROUNDS_PER_PAGE = 20;
  * or "approved only". Was a flat cap-at-50 with no way to see anything
  * older; now genuinely paginated via Supabase's .range(), 20 per page,
  * with an exact total count so the UI knows how many pages exist. */
-export async function listSocietyRounds(page = 1): Promise<PaginatedRounds> {
+export interface RoundsFilter {
+  playerId?: string;
+  courseId?: string;
+}
+
+export async function listSocietyRounds(page = 1, filters: RoundsFilter = {}): Promise<PaginatedRounds> {
   await requireSession();
   const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
@@ -365,13 +370,22 @@ export async function listSocietyRounds(page = 1): Promise<PaginatedRounds> {
   const from = (safePage - 1) * ROUNDS_PER_PAGE;
   const to = from + ROUNDS_PER_PAGE - 1;
 
-  const { data, error, count } = await supabase
+  let query = supabase
     .from("scorecards")
     .select(
       "id, played_at, status, total_stableford_points, proposed_handicap_change, players!scorecards_player_id_fkey(first_name, last_name), courses(name)",
       { count: "exact" }
     )
-    .eq("society_id", societyId)
+    .eq("society_id", societyId);
+
+  if (filters.playerId) {
+    query = query.eq("player_id", filters.playerId);
+  }
+  if (filters.courseId) {
+    query = query.eq("course_id", filters.courseId);
+  }
+
+  const { data, error, count } = await query
     .order("played_at", { ascending: false })
     .order("created_at", { ascending: false })
     .range(from, to);

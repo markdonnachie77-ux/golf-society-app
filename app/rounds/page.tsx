@@ -1,19 +1,29 @@
 import Link from "next/link";
-import { listSocietyRounds } from "@/app/actions/scorecards";
+import { listSocietyRounds, listCoursesForRound } from "@/app/actions/scorecards";
+import { listAllPlayers } from "@/app/actions/players";
 import { cn } from "@/lib/utils";
 import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 import { PaginationControls } from "@/components/pagination-controls";
+import { RoundsFilterBar } from "@/components/rounds-filter-bar";
 
 export default async function RoundsFeedPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; player?: string; course?: string }>;
 }) {
-  const { page: pageParam } = await searchParams;
+  const { page: pageParam, player: playerId, course: courseId } = await searchParams;
   const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
 
-  const { rounds, totalPages, totalCount } = await listSocietyRounds(page);
+  const [{ rounds, totalPages, totalCount }, players, courses] = await Promise.all([
+    listSocietyRounds(page, { playerId, courseId }),
+    listAllPlayers(),
+    listCoursesForRound(),
+  ]);
+
+  const extraParams: Record<string, string> = {};
+  if (playerId) extraParams.player = playerId;
+  if (courseId) extraParams.course = courseId;
 
   return (
     <main className="min-h-screen bg-background px-4 py-12">
@@ -24,12 +34,23 @@ export default async function RoundsFeedPage({
           <p className="mt-1 text-sm text-muted-foreground">
             {totalCount === 0
               ? "Every round logged across the society, most recent first."
-              : `${totalCount} round${totalCount === 1 ? "" : "s"} logged across the society, most recent first.`}
+              : `${totalCount} round${totalCount === 1 ? "" : "s"}${
+                  playerId || courseId ? " matching this filter" : " logged across the society"
+                }, most recent first.`}
           </p>
         </div>
 
+        <RoundsFilterBar
+          players={players}
+          courses={courses}
+          selectedPlayerId={playerId}
+          selectedCourseId={courseId}
+        />
+
         {rounds.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No rounds logged yet.</p>
+          <p className="text-sm text-muted-foreground">
+            {playerId || courseId ? "No rounds match this filter." : "No rounds logged yet."}
+          </p>
         ) : (
           <div className="rounded-lg border border-border bg-card">
             {rounds.map((round, i) => (
@@ -66,7 +87,12 @@ export default async function RoundsFeedPage({
           </div>
         )}
 
-        <PaginationControls currentPage={page} totalPages={totalPages} basePath="/rounds" />
+        <PaginationControls
+          currentPage={page}
+          totalPages={totalPages}
+          basePath="/rounds"
+          extraParams={extraParams}
+        />
       </div>
     </main>
   );
