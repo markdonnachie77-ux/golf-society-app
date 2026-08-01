@@ -60,7 +60,7 @@ export function HandicapTimelineChart({
   return (
     <div>
       <ResponsiveContainer width="100%" height={220}>
-        <LineChart data={points} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+        <LineChart data={points} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(40 22% 82%)" vertical={false} />
           <XAxis
             dataKey="date"
@@ -71,7 +71,6 @@ export function HandicapTimelineChart({
           <YAxis
             tick={{ fontSize: 11, fontFamily: "var(--font-mono)" }}
             stroke="hsl(158 15% 38%)"
-            width={32}
           />
           <Tooltip
             formatter={(value: number) => [value, "Handicap"]}

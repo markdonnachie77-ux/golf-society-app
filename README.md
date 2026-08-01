@@ -842,3 +842,10 @@ exists` patterns) but isn't guaranteed for every migration going forward.
   infers it. This means a brand-new player with zero approved rounds gets
   no chart at all (just a "no approved rounds yet" message) rather than a
   flat line at their starting handicap.
+- **The chart's Y-axis had a fixed 32px width**, sized for a single
+  digit — a two-digit handicap (or a negative "plus" handicap) got its
+  leading character clipped off. Fixed by letting Recharts auto-size the
+  axis based on the actual label content instead of a hardcoded guess,
+  which also meant removing a `-16px` left margin that had been
+  compensating for that old fixed width — left in place, it would have
+  clipped the new, correctly-sized labels from the other side instead.
