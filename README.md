@@ -459,6 +459,28 @@ found is on a text label with `truncate`, which is the safe, correct use
 of the pattern (graceful ellipsis, not a collapsing interactive
 element), not something that needed the same fix.
 
+## Rounds feed pagination
+
+`/rounds` is now paginated — 20 per page — instead of the earlier flat
+cap-at-50 with no way to see anything before it. Real pagination via
+Supabase's `.range()`, with `{ count: "exact" }` on the same query to get
+a total row count alongside the page of results, rather than a separate
+count query.
+
+Pages are plain `?page=N` URLs via real `<Link>`s
+(`components/pagination-controls.tsx`), not client-side state — they
+stay directly navigable, shareable, and work without JS. `listSocietyRounds`
+guards against a garbage page value (someone hand-editing the URL) by
+falling back to page 1 rather than passing a negative/non-integer offset
+into the query.
+
+Only `/rounds` got this — `/admin/approvals`, `/players`, and `/courses`
+are still flat lists. Approvals in particular is a short, actively-managed
+queue (items leave it as soon as they're reviewed), so it's much less
+likely to grow the way a permanent historical feed does — worth
+revisiting if any of the others ever actually need it, not built
+preemptively.
+
 ## Dashboard gross score stats
 
 Every player's dashboard now shows their average gross score and best
@@ -803,9 +825,9 @@ exists` patterns) but isn't guaranteed for every migration going forward.
   lives on the `handicap_history` row the approval creates instead. Worth
   knowing if you ever query `scorecards` directly expecting it to reflect
   what was actually approved.
-- **`/rounds` (the society feed) is capped at the 50 most recent rounds**,
-  not paginated. Fine for a typical society's volume; revisit if that ever
-  feels short.
+- **`/rounds` (the society feed) is now genuinely paginated** — 20 per
+  page, via Supabase's `.range()` with an exact total count, replacing
+  the earlier flat cap-at-50 with no way to see anything older.
 - **The handicap timeline chart's starting point is back-calculated**
   (`first history entry's handicap_value minus its adjustment_amount`)
   rather than stored anywhere — there's no "initial handicap" row in

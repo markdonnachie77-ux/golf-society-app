@@ -3,9 +3,17 @@ import { listSocietyRounds } from "@/app/actions/scorecards";
 import { cn } from "@/lib/utils";
 import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
+import { PaginationControls } from "@/components/pagination-controls";
 
-export default async function RoundsFeedPage() {
-  const rounds = await listSocietyRounds();
+export default async function RoundsFeedPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
+
+  const { rounds, totalPages, totalCount } = await listSocietyRounds(page);
 
   return (
     <main className="min-h-screen bg-background px-4 py-12">
@@ -14,7 +22,9 @@ export default async function RoundsFeedPage() {
           <BrandEyebrow />
           <h1 className="font-display mt-1 text-3xl font-semibold">Rounds</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Every round logged across the society, most recent first.
+            {totalCount === 0
+              ? "Every round logged across the society, most recent first."
+              : `${totalCount} round${totalCount === 1 ? "" : "s"} logged across the society, most recent first.`}
           </p>
         </div>
 
@@ -55,6 +65,8 @@ export default async function RoundsFeedPage() {
             ))}
           </div>
         )}
+
+        <PaginationControls currentPage={page} totalPages={totalPages} basePath="/rounds" />
       </div>
     </main>
   );

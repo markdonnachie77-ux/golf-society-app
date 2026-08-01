@@ -340,32 +340,49 @@ export interface SocietyRoundRow {
   course_name: string;
 }
 
-const SOCIETY_FEED_LIMIT = 50;
+export interface PaginatedRounds {
+  rounds: SocietyRoundRow[];
+  page: number;
+  totalPages: number;
+  totalCount: number;
+}
+
+const ROUNDS_PER_PAGE = 20;
 
 /** Most recent rounds across the whole society, any status — this is a
  * shared feed, not a per-player one, so it isn't filtered to "my rounds"
- * or "approved only". Capped rather than paginated for now; revisit if a
- * society's round volume ever makes 50 feel too short. */
-export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
+ * or "approved only". Was a flat cap-at-50 with no way to see anything
+ * older; now genuinely paginated via Supabase's .range(), 20 per page,
+ * with an exact total count so the UI knows how many pages exist. */
+export async function listSocietyRounds(page = 1): Promise<PaginatedRounds> {
   await requireSession();
   const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
-  const { data, error } = await supabase
+  // Guard against a garbage/negative/non-integer page value reaching the
+  // query — e.g. someone hand-editing the URL's ?page= param.
+  const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+  const from = (safePage - 1) * ROUNDS_PER_PAGE;
+  const to = from + ROUNDS_PER_PAGE - 1;
+
+  const { data, error, count } = await supabase
     .from("scorecards")
     .select(
-      "id, played_at, status, total_stableford_points, proposed_handicap_change, players!scorecards_player_id_fkey(first_name, last_name), courses(name)"
+      "id, played_at, status, total_stableford_points, proposed_handicap_change, players!scorecards_player_id_fkey(first_name, last_name), courses(name)",
+      { count: "exact" }
     )
     .eq("society_id", societyId)
     .order("played_at", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(SOCIETY_FEED_LIMIT);
+    .range(from, to);
+
+  const empty: PaginatedRounds = { rounds: [], page: safePage, totalPages: 1, totalCount: 0 };
 
   if (error) {
     console.error("listSocietyRounds query failed:", error);
-    return [];
+    return empty;
   }
-  if (!data) return [];
+  if (!data) return empty;
 
   interface RawRow {
     id: string;
@@ -378,7 +395,7 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
   }
   const rows = data as unknown as RawRow[];
 
-  return rows.map((row) => {
+  const rounds = rows.map((row) => {
     const player = row.players;
     const course = row.courses;
     return {
@@ -391,6 +408,11 @@ export async function listSocietyRounds(): Promise<SocietyRoundRow[]> {
       course_name: course?.name ?? "Unknown course",
     };
   });
+
+  const totalCount = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / ROUNDS_PER_PAGE));
+
+  return { rounds, page: safePage, totalPages, totalCount };
 }
 
 // ---------- Deletion (admin only) ----------
