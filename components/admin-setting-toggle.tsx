@@ -61,8 +61,8 @@ export function SettingToggle({
       >
         <span
           className={cn(
-            "absolute top-1 h-5 w-5 rounded-full bg-card shadow transition-transform",
-            value ? "translate-x-6" : "translate-x-1"
+            "absolute left-1 top-1 h-5 w-5 rounded-full bg-card shadow transition-transform",
+            value ? "translate-x-5" : "translate-x-0"
           )}
         />
       </button>
