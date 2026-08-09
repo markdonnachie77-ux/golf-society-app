@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth";
 import { checkLoginRateLimit, resetLoginRateLimit } from "@/lib/rate-limit";
 import { getCurrentSocietyId } from "@/lib/tenant";
+import { getAppSettings } from "@/lib/app-settings";
 
 // ---------- Register ----------
 
@@ -40,6 +41,19 @@ export interface ActionResult {
 }
 
 export async function registerPlayer(formData: FormData): Promise<ActionResult> {
+  // The actual boundary for the players_can_self_register setting —
+  // /register hiding its form when this is off is just UX. Checked
+  // first, before any other validation, so a disabled registration
+  // attempt is rejected the same way regardless of what else is (or
+  // isn't) filled in on the submitted form.
+  const settings = await getAppSettings();
+  if (!settings.playersCanSelfRegister) {
+    return {
+      ok: false,
+      error: "Registration is currently closed — contact an admin to be added.",
+    };
+  }
+
   const raw = {
     firstName: String(formData.get("firstName") ?? ""),
     lastName: String(formData.get("lastName") ?? ""),

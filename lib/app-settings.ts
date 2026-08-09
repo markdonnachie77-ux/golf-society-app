@@ -11,7 +11,11 @@ import { isValidBrandColors, type BrandColors } from "@/lib/color";
  * key/value table (see 0014_app_settings.sql, re-keyed per-society in
  * 0015_future_proof_multi_tenancy.sql) — just insert/update a row.
  */
-export type SettingKey = "players_can_log_own_rounds" | "hero_photo_url" | "brand_colors";
+export type SettingKey =
+  | "players_can_log_own_rounds"
+  | "hero_photo_url"
+  | "brand_colors"
+  | "players_can_self_register";
 
 export interface AppSettings {
   /** When false, only admins can log rounds — for a player, even their
@@ -28,12 +32,22 @@ export interface AppSettings {
    * CSS custom properties (base + a readable foreground, light + dark) by
    * lib/color.ts and applied in app/layout.tsx. */
   brandColors: BrandColors | null;
+  /** When false, /register shows a "closed" message instead of the form,
+   * and registerPlayer itself rejects the attempt — the server action is
+   * the actual boundary, same reasoning as playersCanLogOwnRounds (see
+   * app/actions/scorecards.ts's createScorecard): the page hiding the
+   * form is just UX, not what actually stops someone from registering.
+   * Doesn't affect admin-created players (app/actions/auth.ts's
+   * adminCreatePlayer) — that's a separate path entirely, meant to keep
+   * working as the only way in once this is turned off. */
+  playersCanSelfRegister: boolean;
 }
 
 const DEFAULTS: AppSettings = {
   playersCanLogOwnRounds: true,
   heroPhotoUrl: null,
   brandColors: null,
+  playersCanSelfRegister: true,
 };
 
 /**
@@ -81,5 +95,8 @@ export const getAppSettings = cache(async function getAppSettings(): Promise<App
     // was written by a future/older shape of this setting (or edited by
     // hand in Studio) silently producing malformed CSS variables.
     brandColors: isValidBrandColors(rawBrandColors) ? rawBrandColors : DEFAULTS.brandColors,
+    playersCanSelfRegister:
+      (byKey.get("players_can_self_register") as boolean | undefined) ??
+      DEFAULTS.playersCanSelfRegister,
   };
 });

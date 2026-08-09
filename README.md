@@ -668,6 +668,17 @@ walkthrough, including the re-login-required gotcha), by explicit
 choice rather than oversight: this keeps who can become an admin a
 decision made directly in the database, not exposed as an app feature.
 
+**Closing self-registration.** The natural complement to admin-created
+players: a "Players can register themselves" toggle in
+`/admin/settings`, off by default meaning on (`playersCanSelfRegister`
+defaults `true`, so nothing changes for an existing society until an
+admin explicitly turns it off). Same two-layer pattern as
+`playersCanLogOwnRounds` — `/register` hiding its form when this is off
+is just UX; `registerPlayer` itself checking the setting, first thing,
+before any other validation, is the actual boundary. Doesn't touch
+`adminCreatePlayer` at all — that's a deliberately separate path, meant
+to keep working as the only way in once self-registration is closed.
+
 ## Application settings (`/admin/settings`)
 
 A general, extensible settings store — `app_settings` is a plain

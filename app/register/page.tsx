@@ -20,10 +20,20 @@ export default async function RegisterPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Register</CardTitle>
-              <CardDescription>Your details, then a 4-digit PIN you'll use to log in.</CardDescription>
+              {settings.playersCanSelfRegister && (
+                <CardDescription>
+                  Your details, then a 4-digit PIN you'll use to log in.
+                </CardDescription>
+              )}
             </CardHeader>
             <CardContent>
-              <RegisterForm />
+              {settings.playersCanSelfRegister ? (
+                <RegisterForm />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Registration is currently closed. Contact an admin to be added.
+                </p>
+              )}
             </CardContent>
           </Card>
 

@@ -28,6 +28,13 @@ export default async function AdminSettingsPage() {
             initialValue={settings.playersCanLogOwnRounds}
           />
           <div className="ledger-rule" />
+          <SettingToggle
+            settingKey="players_can_self_register"
+            label="Players can register themselves"
+            description="Turn off to close /register — the only way to add a player is then an admin creating their account directly from the Members page."
+            initialValue={settings.playersCanSelfRegister}
+          />
+          <div className="ledger-rule" />
           <AdminHeroPhotoSetting currentPhotoUrl={settings.heroPhotoUrl} />
           <div className="ledger-rule" />
           <AdminBrandColorsSetting currentColors={settings.brandColors} />
