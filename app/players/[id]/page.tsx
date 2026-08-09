@@ -5,6 +5,7 @@ import { getPlayerProfile } from "@/app/actions/players";
 import { HandicapTimelineChart } from "@/components/handicap-timeline-chart";
 import { AdminHandicapPanel } from "@/components/admin-handicap-panel";
 import { AdminWipeHistoryPanel } from "@/components/admin-wipe-history-panel";
+import { AdminResetPinPanel } from "@/components/admin-reset-pin-panel";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { SCORECARD_STATUS_LABEL, SCORECARD_STATUS_STYLE } from "@/lib/scorecard-status";
@@ -61,6 +62,7 @@ export default async function PlayerProfilePage({
           <div className="mt-4 flex flex-wrap gap-2">
             <AdminHandicapPanel playerId={player.id} currentHandicap={player.current_handicap} />
             <AdminWipeHistoryPanel playerId={player.id} />
+            <AdminResetPinPanel playerId={player.id} />
           </div>
         )}
 

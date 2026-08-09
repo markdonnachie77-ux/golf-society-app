@@ -10,7 +10,7 @@ import { extractSubdomain } from "@/lib/tenant-resolution";
 const SESSION_COOKIE_NAME = "gs_session";
 
 const PUBLIC_PATHS = ["/login", "/register"];
-const ADMIN_PATH_PREFIXES = ["/admin", "/courses"];
+const ADMIN_PATH_PREFIXES = ["/admin", "/courses", "/players/new"];
 
 // ---------------------------------------------------------------------------
 // Multi-tenant resolution

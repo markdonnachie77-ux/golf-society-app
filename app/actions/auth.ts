@@ -9,6 +9,7 @@ import {
   createSessionToken,
   setSessionCookie,
   clearSessionCookie,
+  requireAdmin,
 } from "@/lib/auth";
 import { checkLoginRateLimit, resetLoginRateLimit } from "@/lib/rate-limit";
 import { getCurrentSocietyId } from "@/lib/tenant";
@@ -97,6 +98,139 @@ export async function registerPlayer(formData: FormData): Promise<ActionResult> 
   await setSessionCookie(token);
 
   redirect("/dashboard");
+}
+
+// ---------- Admin-created players ----------
+
+/** 4 digits, full 0000-9999 range (leading zero allowed) — same format
+ * self-chosen PINs use, just generated rather than typed. */
+function generateRandomPin(): string {
+  return String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+}
+
+export interface CreatedPlayerResult {
+  ok: boolean;
+  error?: string;
+  fieldErrors?: Record<string, string>;
+  /** Only present on success — the plaintext PIN, shown to the admin
+   * exactly once. Nothing stores this anywhere; only the bcrypt hash is
+   * persisted, same as every other PIN in this app. If it's lost before
+   * being relayed to the player, the only recovery is resetting it again
+   * via adminResetPlayerPin. */
+  player?: { id: string; firstName: string; lastName: string; pin: string };
+}
+
+const adminCreatePlayerSchema = z.object({
+  firstName: z.string().trim().min(1, "First name is required").max(80),
+  lastName: z.string().trim().min(1, "Last name is required").max(80),
+  email: z
+    .string()
+    .trim()
+    .email("Enter a valid email")
+    .optional()
+    .or(z.literal("")),
+  initialHandicap: z
+    .number({ invalid_type_error: "Handicap must be a number" })
+    .min(-10, "Handicap looks too low")
+    .max(54, "Handicap looks too high"),
+});
+
+/**
+ * Admin-initiated player creation — the PIN is generated, not chosen, and
+ * shown once in the result for the admin to relay. Always creates as
+ * role "player"; promoting to admin is still a deliberate manual step in
+ * Supabase Studio, not something this form offers (an explicit choice —
+ * see README).
+ *
+ * Deliberately doesn't log the admin in as the new player or touch their
+ * own session at all — unlike registerPlayer, which is a person creating
+ * and immediately logging into their own account, this is one person
+ * (the admin) acting on someone else's behalf, staying logged in as
+ * themselves throughout.
+ */
+export async function adminCreatePlayer(formData: FormData): Promise<CreatedPlayerResult> {
+  await requireAdmin();
+
+  const raw = {
+    firstName: String(formData.get("firstName") ?? ""),
+    lastName: String(formData.get("lastName") ?? ""),
+    email: String(formData.get("email") ?? ""),
+    initialHandicap: Number(formData.get("initialHandicap")),
+  };
+
+  const parsed = adminCreatePlayerSchema.safeParse(raw);
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      fieldErrors[String(issue.path[0])] = issue.message;
+    }
+    return { ok: false, error: "Please fix the highlighted fields.", fieldErrors };
+  }
+
+  const data = parsed.data;
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
+
+  const pin = generateRandomPin();
+  const pinHash = await hashPin(pin);
+
+  const { data: player, error } = await supabase
+    .from("players")
+    .insert({
+      first_name: data.firstName,
+      last_name: data.lastName,
+      email: data.email || null,
+      current_handicap: data.initialHandicap,
+      pin_hash: pinHash,
+      role: "player",
+      society_id: societyId,
+    })
+    .select("id, first_name, last_name")
+    .single();
+
+  if (error || !player) {
+    return { ok: false, error: "Could not create this player. Please try again." };
+  }
+
+  return {
+    ok: true,
+    player: { id: player.id, firstName: player.first_name, lastName: player.last_name, pin },
+  };
+}
+
+/**
+ * Generates a fresh PIN for an existing player and overwrites their
+ * pin_hash — e.g. they've forgotten it, lost the device it was on, or an
+ * admin-generated PIN never made it to them. Scoped by society_id in the
+ * update itself (same pattern as updateCourse in app/actions/courses.ts)
+ * rather than a separate check-then-act: if playerId belongs to a
+ * different tenant, this matches zero rows and .select() detects that,
+ * rather than a race window between checking and updating.
+ */
+export async function adminResetPlayerPin(playerId: string): Promise<CreatedPlayerResult> {
+  await requireAdmin();
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
+
+  const pin = generateRandomPin();
+  const pinHash = await hashPin(pin);
+
+  const { data: updated, error } = await supabase
+    .from("players")
+    .update({ pin_hash: pinHash })
+    .eq("id", playerId)
+    .eq("society_id", societyId)
+    .select("id, first_name, last_name")
+    .single();
+
+  if (error || !updated) {
+    return { ok: false, error: "Could not reset this player's PIN." };
+  }
+
+  return {
+    ok: true,
+    player: { id: updated.id, firstName: updated.first_name, lastName: updated.last_name, pin },
+  };
 }
 
 // ---------- Login ----------

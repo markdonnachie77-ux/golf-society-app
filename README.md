@@ -640,6 +640,34 @@ unrelated to table typing — so I don't expect the same class of issue,
 but it's worth knowing I'm reasoning from how the library is documented
 to behave here, not from having compiled it.
 
+## Admin-created players (`/players/new`)
+
+Admins can create a player account directly, without the player
+self-registering — `/players` shows an "Add player" button, admin-only
+(gated both by the page hiding it and by `middleware.ts`'s
+`ADMIN_PATH_PREFIXES`, which now includes `/players/new` specifically —
+narrow enough that it doesn't accidentally gate `/players` itself or any
+player's own profile at `/players/<uuid>`, since a real UUID can never
+start with the literal string "new").
+
+**The PIN is generated, not typed by the admin** — a deliberate choice.
+`adminCreatePlayer` (in `app/actions/auth.ts`, alongside the self-service
+`registerPlayer` it mirrors) creates the player with a random 4-digit PIN
+and returns it in the result exactly once, for the admin to relay to the
+new player. Nothing stores the plaintext PIN anywhere — only its bcrypt
+hash is persisted, same as every other PIN in this app. If it's lost
+before being passed along, or the player forgets it later, an admin can
+generate a fresh one from `AdminResetPinPanel` on the player's own
+profile page, sitting alongside the existing handicap-adjustment and
+wipe-history admin panels.
+
+Always creates as `role: "player"` — there's no role picker on this
+form. Promoting to admin stays a deliberate manual step in Supabase
+Studio's table editor (see "Seed data" above for the full promotion
+walkthrough, including the re-login-required gotcha), by explicit
+choice rather than oversight: this keeps who can become an admin a
+decision made directly in the database, not exposed as an app feature.
+
 ## Application settings (`/admin/settings`)
 
 A general, extensible settings store — `app_settings` is a plain

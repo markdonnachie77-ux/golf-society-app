@@ -1,16 +1,26 @@
 import Link from "next/link";
+import { requireSession } from "@/lib/auth";
 import { listAllPlayers } from "@/app/actions/players";
+import { Button } from "@/components/ui/button";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 
 export default async function PlayersPage() {
+  const session = await requireSession();
   const players = await listAllPlayers();
 
   return (
     <main className="min-h-screen bg-background px-4 py-12">
       <div className="mx-auto max-w-2xl">
-        <div className="mb-8">
-          <BrandEyebrow />
-          <h1 className="font-display mt-1 text-3xl font-semibold">Members</h1>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <BrandEyebrow />
+            <h1 className="font-display mt-1 text-3xl font-semibold">Members</h1>
+          </div>
+          {session.role === "admin" && (
+            <Button asChild size="sm">
+              <Link href="/players/new">Add player</Link>
+            </Button>
+          )}
         </div>
 
         <div className="rounded-lg border border-border bg-card">
