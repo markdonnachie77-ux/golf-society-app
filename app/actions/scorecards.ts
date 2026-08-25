@@ -359,7 +359,11 @@ export interface RoundsFilter {
   courseId?: string;
 }
 
-export async function listSocietyRounds(page = 1, filters: RoundsFilter = {}): Promise<PaginatedRounds> {
+export async function listSocietyRounds(
+  page = 1,
+  filters: RoundsFilter = {},
+  sortByScore?: "asc" | "desc"
+): Promise<PaginatedRounds> {
   await requireSession();
   const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
@@ -383,6 +387,21 @@ export async function listSocietyRounds(page = 1, filters: RoundsFilter = {}): P
   }
   if (filters.courseId) {
     query = query.eq("course_id", filters.courseId);
+  }
+
+  // total_stableford_points is a direct column on scorecards, so this
+  // sorts natively with no join/embed complications — unlike sorting by
+  // player or course name would be, since those only exist on the
+  // related players/courses tables. PostgREST doesn't actually support
+  // ordering a parent row by an embedded table's column (a long-standing,
+  // still-open limitation: it only orders rows *within* a nested array,
+  // not the parent rows), so a name-based sort would need a real fix
+  // (e.g. a flattening view) — out of scope here since this is score-only.
+  if (sortByScore) {
+    query = query.order("total_stableford_points", {
+      ascending: sortByScore === "asc",
+      nullsFirst: false,
+    });
   }
 
   const { data, error, count } = await query

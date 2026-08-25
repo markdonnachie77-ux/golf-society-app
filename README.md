@@ -459,7 +459,7 @@ found is on a text label with `truncate`, which is the safe, correct use
 of the pattern (graceful ellipsis, not a collapsing interactive
 element), not something that needed the same fix.
 
-## Rounds feed: pagination and filtering
+## Rounds feed: pagination, filtering, and sorting by score
 
 `/rounds` is paginated (20 per page) and filterable by player and/or
 course, both via plain `?page=N&player=<id>&course=<id>` query params —
@@ -471,6 +471,26 @@ drop the filter. Changing a filter always navigates back to page 1
 (`components/rounds-filter-bar.tsx`), since a different filter means a
 different total page count.
 
+**Sorting is by Score only, not every column.** Clicking the "Score"
+header cycles unsorted → highest first → lowest first → unsorted
+(`?sort=desc` / `?sort=asc`), same URL-param approach as pagination and
+filtering, correctly composing with both. `total_stableford_points` is a
+direct column on `scorecards`, so this sorts natively with a plain
+`.order()` call — no complications.
+
+Player name and course name were deliberately **not** made sortable
+alongside it: they only exist on the related `players`/`courses` tables
+via an embedded select, and PostgREST has a long-standing, still-open
+limitation where `.order()` on an embedded/foreign table's column only
+orders rows *within* a nested array — it does not order the parent rows
+by that value (see
+[postgrest-js#198](https://github.com/supabase/postgrest-js/issues/198)).
+Sorting name-based columns correctly would need a real fix — most likely
+a Postgres view flattening player/course names onto the row directly, so
+every sortable column is a plain, ordinary column PostgREST can sort
+without the embedding problem — not a small enough addition to bundle in
+here.
+
 Real pagination via Supabase's `.range()`, with `{ count: "exact" }` on
 the same query to get a total row count alongside the page of results,
 rather than a separate count query — this replaced an earlier flat
@@ -481,7 +501,7 @@ The two filter dropdowns reuse `listAllPlayers()` and
 member, not admin-gated, which matters here since any player (not just
 admins) can filter the shared rounds feed.
 
-Only `/rounds` has pagination or filtering — `/admin/approvals`,
+Only `/rounds` has pagination, filtering, or sorting — `/admin/approvals`,
 `/players`, and `/courses` are still flat lists. Approvals in particular
 is a short, actively-managed queue (items leave it as soon as they're
 reviewed), so it's much less likely to grow the way a permanent
