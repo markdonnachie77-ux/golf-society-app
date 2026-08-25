@@ -357,6 +357,26 @@ const ROUNDS_PER_PAGE = 20;
 export interface RoundsFilter {
   playerId?: string;
   courseId?: string;
+  /** Both inclusive, "YYYY-MM-DD" — played_at is a plain `date` column
+   * (supabase/migrations/0004_create_scorecards.sql), not a timestamp,
+   * so a simple string .gte()/.lte() range works cleanly with no
+   * time-of-day boundary considerations. Validated here (isValidDateString)
+   * rather than trusted from the query string — a malformed value should
+   * be ignored, not sent through to Postgres as a broken filter. */
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isValidDateString(value: string): boolean {
+  if (!DATE_RE.test(value)) return false;
+  // Date.parse alone isn't enough — it silently "rolls over" an
+  // impossible calendar date (e.g. Feb 30 becomes March 2) rather than
+  // rejecting it. Constructing the date and checking the result's
+  // actual year/month/day match what was asked for catches that.
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 export async function listSocietyRounds(
@@ -387,6 +407,12 @@ export async function listSocietyRounds(
   }
   if (filters.courseId) {
     query = query.eq("course_id", filters.courseId);
+  }
+  if (filters.dateFrom && isValidDateString(filters.dateFrom)) {
+    query = query.gte("played_at", filters.dateFrom);
+  }
+  if (filters.dateTo && isValidDateString(filters.dateTo)) {
+    query = query.lte("played_at", filters.dateTo);
   }
 
   // total_stableford_points is a direct column on scorecards, so this

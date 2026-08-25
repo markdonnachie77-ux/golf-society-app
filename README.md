@@ -459,44 +459,66 @@ found is on a text label with `truncate`, which is the safe, correct use
 of the pattern (graceful ellipsis, not a collapsing interactive
 element), not something that needed the same fix.
 
-## Rounds feed: pagination, filtering, and sorting by score
+## Rounds feed: pagination, filtering, sorting, and date range
 
-`/rounds` is paginated (20 per page) and filterable by player and/or
-course, both via plain `?page=N&player=<id>&course=<id>` query params —
-same URL-is-the-source-of-truth approach for both, not client-side state.
+`/rounds` is paginated (20 per page) and filterable by player, course,
+and/or a date range, all via plain query params
+(`?page=N&player=<id>&course=<id>&from=YYYY-MM-DD&to=YYYY-MM-DD`) — same
+URL-is-the-source-of-truth approach throughout, not client-side state.
 That matters together, not just individually: `PaginationControls`
-carries the active filters into its Previous/Next links via an
+carries every active filter into its Previous/Next links via an
 `extraParams` prop, so paging forward on a filtered view doesn't silently
-drop the filter. Changing a filter always navigates back to page 1
-(`components/rounds-filter-bar.tsx`), since a different filter means a
-different total page count.
+drop anything. Changing a filter always navigates back to page 1, since
+a different filter means a different total page count.
 
-**Sorting is by Score only, not every column.** Clicking the "Score"
-header cycles unsorted → highest first → lowest first → unsorted
-(`?sort=desc` / `?sort=asc`), same URL-param approach as pagination and
-filtering, correctly composing with both. `total_stableford_points` is a
-direct column on `scorecards`, so this sorts natively with a plain
-`.order()` call — no complications.
+**The date range filter is `played_at` (a plain Postgres `date` column,
+not a timestamp) with `.gte()`/`.lte()`** — both bounds inclusive, no
+time-of-day boundary considerations needed since there's no time
+component to the column at all. Validated server-side
+(`isValidDateString` in `app/actions/scorecards.ts`) before ever reaching
+the query — this isn't just format-checking (`\d{4}-\d{2}-\d{2}`), it
+also catches calendar-invalid dates a naive `Date.parse()` would
+silently "roll over" instead of rejecting (`2026-02-30` parses as March
+2nd rather than throwing) — constructing the date and checking the
+result's actual year/month/day match what was asked for catches that.
+The two `<input type="date">`s also cross-constrain each other's
+`min`/`max` client-side, so an inverted range can't be picked in the
+browser's own date picker in the first place — a nice-to-have on top of
+the real server-side validation, not a substitute for it.
 
-Player name and course name were deliberately **not** made sortable
-alongside it: they only exist on the related `players`/`courses` tables
-via an embedded select, and PostgREST has a long-standing, still-open
-limitation where `.order()` on an embedded/foreign table's column only
-orders rows *within* a nested array — it does not order the parent rows
-by that value (see
+**Sorting is by Score only** — clicking the "Score" header cycles
+unsorted → highest first → lowest first → unsorted (`?sort=desc` /
+`?sort=asc`), same URL-param approach, composing correctly with every
+filter above. `total_stableford_points` is a direct column on
+`scorecards`, so this sorts natively with a plain `.order()` call — no
+complications. Player name and course name were deliberately **not**
+made sortable alongside it: they only exist on the related
+`players`/`courses` tables via an embedded select, and PostgREST has a
+long-standing, still-open limitation where `.order()` on an
+embedded/foreign table's column only orders rows *within* a nested
+array — it does not order the parent rows by that value (see
 [postgrest-js#198](https://github.com/supabase/postgrest-js/issues/198)).
 Sorting name-based columns correctly would need a real fix — most likely
-a Postgres view flattening player/course names onto the row directly, so
-every sortable column is a plain, ordinary column PostgREST can sort
-without the embedding problem — not a small enough addition to bundle in
-here.
+a Postgres view flattening player/course names onto the row directly —
+not a small enough addition to bundle in alongside the rest of this.
+
+One cross-feature bug worth knowing about, since it's the kind of thing
+that's easy to reintroduce: `RoundsFilterBar`'s `navigate()` always
+merges a change into the *full* current filter/sort state (passed in as
+props), rather than each filter rebuilding the URL from just its own
+value. An earlier version didn't do this — changing the player filter
+would silently drop an active score sort, and vice versa, since neither
+filter's handler knew what the other currently had set. Any future
+filter/sort control added to this page should go through the same
+merge-with-full-state pattern, not reintroduce a handler that only knows
+about itself.
 
 Real pagination via Supabase's `.range()`, with `{ count: "exact" }` on
 the same query to get a total row count alongside the page of results,
 rather than a separate count query — this replaced an earlier flat
 cap-at-50 with no way to see anything before it.
 
-The two filter dropdowns reuse `listAllPlayers()` and
+The two dropdown filters reuse `listAllPlayers()` and
 `listCoursesForRound()` — both already open to any logged-in society
 member, not admin-gated, which matters here since any player (not just
 admins) can filter the shared rounds feed.

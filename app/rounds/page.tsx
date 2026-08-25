@@ -10,14 +10,29 @@ import { RoundsFilterBar } from "@/components/rounds-filter-bar";
 export default async function RoundsFeedPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; player?: string; course?: string; sort?: string }>;
+  searchParams: Promise<{
+    page?: string;
+    player?: string;
+    course?: string;
+    from?: string;
+    to?: string;
+    sort?: string;
+  }>;
 }) {
-  const { page: pageParam, player: playerId, course: courseId, sort: sortParam } = await searchParams;
+  const {
+    page: pageParam,
+    player: playerId,
+    course: courseId,
+    from: dateFrom,
+    to: dateTo,
+    sort: sortParam,
+  } = await searchParams;
   const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
   const sortByScore = sortParam === "asc" || sortParam === "desc" ? sortParam : undefined;
+  const hasActiveFilter = Boolean(playerId || courseId || dateFrom || dateTo);
 
   const [{ rounds, totalPages, totalCount }, players, courses] = await Promise.all([
-    listSocietyRounds(page, { playerId, courseId }, sortByScore),
+    listSocietyRounds(page, { playerId, courseId, dateFrom, dateTo }, sortByScore),
     listAllPlayers(),
     listCoursesForRound(),
   ]);
@@ -25,6 +40,8 @@ export default async function RoundsFeedPage({
   const extraParams: Record<string, string> = {};
   if (playerId) extraParams.player = playerId;
   if (courseId) extraParams.course = courseId;
+  if (dateFrom) extraParams.from = dateFrom;
+  if (dateTo) extraParams.to = dateTo;
   if (sortByScore) extraParams.sort = sortByScore;
 
   // Clicking "Score" cycles unsorted -> highest first -> lowest first ->
@@ -51,7 +68,7 @@ export default async function RoundsFeedPage({
             {totalCount === 0
               ? "Every round logged across the society, most recent first."
               : `${totalCount} round${totalCount === 1 ? "" : "s"}${
-                  playerId || courseId ? " matching this filter" : " logged across the society"
+                  hasActiveFilter ? " matching this filter" : " logged across the society"
                 }, most recent first.`}
           </p>
         </div>
@@ -61,11 +78,14 @@ export default async function RoundsFeedPage({
           courses={courses}
           selectedPlayerId={playerId}
           selectedCourseId={courseId}
+          selectedDateFrom={dateFrom}
+          selectedDateTo={dateTo}
+          selectedSort={sortByScore}
         />
 
         {rounds.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {playerId || courseId ? "No rounds match this filter." : "No rounds logged yet."}
+            {hasActiveFilter ? "No rounds match this filter." : "No rounds logged yet."}
           </p>
         ) : (
           <>
