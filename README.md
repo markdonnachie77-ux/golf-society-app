@@ -682,6 +682,21 @@ unrelated to table typing — so I don't expect the same class of issue,
 but it's worth knowing I'm reasoning from how the library is documented
 to behave here, not from having compiled it.
 
+## Members page: sort by handicap
+
+`/players` has a clickable "Handicap" header, same 3-state cycle and
+URL-param approach as the rounds feed's Score sort
+(`?sort=asc`/`?sort=desc`) — unsorted (alphabetical by last name) →
+lowest/best handicap first → highest first → back to unsorted.
+`current_handicap` is a direct column on `players` itself, so this is
+simpler than the rounds feed's sort: no join/embedding to worry about at
+all, since there's no related table involved.
+
+`listAllPlayers()` takes the sort as an optional parameter specifically
+so its other callers — the admin "log a round on behalf of" picker, the
+rounds feed's player filter dropdown — keep their existing (unsorted,
+alphabetical) behavior unchanged; only `/players` itself passes it.
+
 ## Admin-created players (`/players/new`)
 
 Admins can create a player account directly, without the player

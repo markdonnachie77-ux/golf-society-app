@@ -4,9 +4,25 @@ import { listAllPlayers } from "@/app/actions/players";
 import { Button } from "@/components/ui/button";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 
-export default async function PlayersPage() {
+export default async function PlayersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>;
+}) {
   const session = await requireSession();
-  const players = await listAllPlayers();
+  const { sort: sortParam } = await searchParams;
+  const sortByHandicap = sortParam === "asc" || sortParam === "desc" ? sortParam : undefined;
+
+  const players = await listAllPlayers(sortByHandicap);
+
+  // Clicking "Handicap" cycles unsorted -> lowest (best) first -> highest
+  // first -> unsorted, back to alphabetical by last name. Mirrors the
+  // rounds feed's Score sort — same 3-state cycle, same URL-param
+  // approach — but simpler here since there's no pagination or other
+  // filter state on this page to preserve alongside it yet.
+  const nextSort = sortByHandicap === undefined ? "asc" : sortByHandicap === "asc" ? "desc" : undefined;
+  const handicapHeaderHref = nextSort ? `/players?sort=${nextSort}` : "/players";
+  const handicapIndicator = sortByHandicap === "asc" ? " ▲" : sortByHandicap === "desc" ? " ▼" : "";
 
   return (
     <main className="min-h-screen bg-background px-4 py-12">
@@ -21,6 +37,15 @@ export default async function PlayersPage() {
               <Link href="/players/new">Add player</Link>
             </Button>
           )}
+        </div>
+
+        <div className="mb-2 flex items-center justify-end px-1">
+          <Link
+            href={handicapHeaderHref}
+            className="text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+          >
+            Handicap{handicapIndicator}
+          </Link>
         </div>
 
         <div className="rounded-lg border border-border bg-card">

@@ -13,16 +13,27 @@ export interface PlayerListRow {
   role: string;
 }
 
-export async function listAllPlayers(): Promise<PlayerListRow[]> {
+/**
+ * Default order is alphabetical by last name — sortByHandicap is
+ * optional so every existing caller (the admin "log on behalf of"
+ * picker, the rounds feed's player filter dropdown) keeps its current
+ * behavior unchanged; only /players itself passes it.
+ */
+export async function listAllPlayers(sortByHandicap?: "asc" | "desc"): Promise<PlayerListRow[]> {
   await requireSession();
   const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("players")
     .select("id, first_name, last_name, current_handicap, role")
-    .eq("society_id", societyId)
-    .order("last_name", { ascending: true });
+    .eq("society_id", societyId);
+
+  query = sortByHandicap
+    ? query.order("current_handicap", { ascending: sortByHandicap === "asc" })
+    : query.order("last_name", { ascending: true });
+
+  const { data, error } = await query;
 
   if (error || !data) return [];
   return data;
