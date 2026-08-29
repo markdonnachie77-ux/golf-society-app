@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/auth";
-import { getEventDetail } from "@/app/actions/events";
+import { getEventDetail, getEventLeaderboard } from "@/app/actions/events";
 import { listAllPlayers } from "@/app/actions/players";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
@@ -30,6 +30,11 @@ function formatTeeTime(timeStr: string): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+const FORMAT_LABEL: Record<"stroke_play" | "stableford", string> = {
+  stroke_play: "Stroke play",
+  stableford: "Stableford",
+};
+
 export default async function EventDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   const { id } = await params;
@@ -44,20 +49,26 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
   const isFull = event.registrations.length >= event.capacity;
   const registeredPlayerIds = new Set(event.registrations.map((r) => r.playerId));
 
-  const players = isAdmin ? await listAllPlayers() : [];
+  const [players, leaderboard] = await Promise.all([
+    isAdmin ? listAllPlayers() : Promise.resolve([]),
+    getEventLeaderboard(event.id),
+  ]);
 
   return (
     <main className="min-h-screen bg-background px-4 py-12">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8">
           <BrandEyebrow />
-          <div className="mt-1 flex items-center gap-3">
+          <div className="mt-1 flex flex-wrap items-center gap-3">
             <h1 className="font-display text-3xl font-semibold">{event.name}</h1>
             {event.status === "draft" && (
               <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
                 Draft
               </span>
             )}
+            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
+              {FORMAT_LABEL[event.format]}
+            </span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {event.courseName} · {formatEventDate(event.eventDate)} · First tee{" "}
@@ -101,6 +112,39 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
             </CardContent>
           </Card>
         )}
+
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-lg">Leaderboard</CardTitle>
+            <CardDescription>
+              {FORMAT_LABEL[event.format]} ·{" "}
+              {event.format === "stroke_play" ? "lowest net score wins" : "highest points wins"} ·
+              approved rounds only
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {leaderboard.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No approved rounds tagged to this event yet.
+              </p>
+            ) : (
+              <ol className="space-y-2">
+                {leaderboard.map((entry, i) => (
+                  <li key={entry.scorecardId} className="flex items-center justify-between">
+                    <span className="flex items-center gap-3">
+                      <span className="font-numeral w-5 text-sm text-muted-foreground">{i + 1}</span>
+                      <span className="text-sm">{entry.playerName}</span>
+                    </span>
+                    <span className="font-numeral text-sm font-semibold">
+                      {entry.score}
+                      {event.format === "stableford" ? " pts" : ""}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

@@ -11,6 +11,7 @@ import { PlayerSelect } from "@/components/player-select";
 import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
 import { allowedRoundTypes } from "@/lib/round-setup";
 import { getHolesForRound, createScorecard } from "@/app/actions/scorecards";
+import { listRegisteredEventsForRoundLogging, type RegisteredEventOption } from "@/app/actions/events";
 import type { ActionResult } from "@/app/actions/auth";
 
 interface Course {
@@ -46,12 +47,14 @@ export function NewScorecardForm({
   viewerPlayerId,
   isAdmin = false,
   allPlayers = [],
+  initialCandidateEvents = [],
 }: {
   courses: Course[];
   defaultHandicap: number;
   viewerPlayerId: string;
   isAdmin?: boolean;
   allPlayers?: PlayerOption[];
+  initialCandidateEvents?: RegisteredEventOption[];
 }) {
   const [courseId, setCourseId] = React.useState<string | null>(
     courses.length === 1 ? courses[0].id : null
@@ -67,20 +70,50 @@ export function NewScorecardForm({
   const [pickedUpByHole, setPickedUpByHole] = React.useState<Record<string, boolean>>({});
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
+  const [candidateEvents, setCandidateEvents] =
+    React.useState<RegisteredEventOption[]>(initialCandidateEvents);
+  const [selectedEventId, setSelectedEventId] = React.useState<string>("");
 
   /** When an admin switches who they're logging for, default the playing
    * handicap to THAT player's current handicap rather than leaving
-   * whatever was there before (still editable either way). */
+   * whatever was there before (still editable either way). Also
+   * refetches which events THAT player is registered for — the initial
+   * candidateEvents list passed in is only ever for the viewer
+   * themselves, so switching to someone else needs a fresh lookup for
+   * the event-linking dropdown below to stay correct for whoever the
+   * round is actually being logged for. */
   function handleOnBehalfOfChange(playerId: string) {
     setOnBehalfOfPlayerId(playerId);
+    setSelectedEventId("");
     const target = allPlayers.find((p) => p.id === playerId);
     if (target) {
       setPlayingHandicap(String(target.current_handicap));
+    }
+    if (playerId === viewerPlayerId) {
+      setCandidateEvents(initialCandidateEvents);
+    } else {
+      listRegisteredEventsForRoundLogging(playerId).then(setCandidateEvents);
     }
   }
 
   const selectedCourse = courses.find((c) => c.id === courseId) ?? null;
   const roundTypeOptions = selectedCourse ? allowedRoundTypes(selectedCourse.hole_count) : [];
+
+  // Only events that genuinely match the round actually being logged —
+  // same course, same date — not every event the player happens to be
+  // registered for. Recomputed on every render from candidateEvents
+  // (which changes when the on-behalf-of player changes) plus whatever
+  // course/date are currently selected.
+  const matchingEvents = candidateEvents.filter(
+    (e) => e.courseId === courseId && e.eventDate === playedAt
+  );
+
+  React.useEffect(() => {
+    if (selectedEventId && !matchingEvents.some((e) => e.id === selectedEventId)) {
+      setSelectedEventId("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId, playedAt, candidateEvents]);
 
   function handleCourseChange(id: string) {
     setCourseId(id);
@@ -88,6 +121,7 @@ export function NewScorecardForm({
     setHoles([]);
     setGrossByHole({});
     setPickedUpByHole({});
+    setSelectedEventId("");
   }
 
   // A 9-hole course has exactly one valid round type — pick it automatically
@@ -173,6 +207,7 @@ export function NewScorecardForm({
     formData.set("roundType", roundType);
     formData.set("playedAt", playedAt);
     formData.set("playingHandicap", playingHandicap);
+    formData.set("eventId", selectedEventId);
     formData.set(
       "scoresJson",
       JSON.stringify(
@@ -304,6 +339,29 @@ export function NewScorecardForm({
               />
             </div>
           </div>
+
+          {matchingEvents.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="eventId">Log this round for an event?</Label>
+              <select
+                id="eventId"
+                value={selectedEventId}
+                onChange={(e) => setSelectedEventId(e.target.value)}
+                className="flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 text-base text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+              >
+                <option value="">Just a normal round — not for an event</option>
+                {matchingEvents.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Matches this course and date against events{" "}
+                {onBehalfOfPlayerId === viewerPlayerId ? "you're" : "they're"} registered for.
+              </p>
+            </div>
+          )}
         </>
       )}
 

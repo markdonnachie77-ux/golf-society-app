@@ -25,6 +25,7 @@ export type TeeColor = "white" | "yellow";
 export type RoundType = "full_18" | "front_9" | "back_9";
 export type ScorecardStatus = "pending_approval" | "approved" | "rejected";
 export type EventStatus = "draft" | "published";
+export type EventFormat = "stroke_play" | "stableford";
 
 export interface Database {
   public: {
@@ -168,6 +169,7 @@ export interface Database {
           reviewed_at: string | null;
           created_at: string;
           society_id: string;
+          event_id: string | null;
         };
         Insert: {
           id?: string;
@@ -186,6 +188,7 @@ export interface Database {
           reviewed_at?: string | null;
           created_at?: string;
           society_id?: string;
+          event_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["scorecards"]["Insert"]>;
         Relationships: [
@@ -215,6 +218,13 @@ export interface Database {
             columns: ["society_id"];
             isOneToOne: false;
             referencedRelation: "societies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "scorecards_event_id_fkey";
+            columns: ["event_id"];
+            isOneToOne: false;
+            referencedRelation: "events";
             referencedColumns: ["id"];
           }
         ];
@@ -355,6 +365,7 @@ export interface Database {
           capacity: number;
           self_registration_enabled: boolean;
           status: EventStatus;
+          format: EventFormat;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -369,6 +380,7 @@ export interface Database {
           capacity: number;
           self_registration_enabled?: boolean;
           status?: EventStatus;
+          format?: EventFormat;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;

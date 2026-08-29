@@ -770,6 +770,54 @@ spot at nearly the same moment, an admin overbooking on purpose, a
 player withdrawing and re-registering, and reverting a published event
 back to draft.
 
+### Event scoring format and leaderboard (`0018_event_scoring.sql`)
+
+Each event has a scoring format — Stroke Play or Stableford — that
+governs its leaderboard only, nothing else. Handicap adjustment always
+uses Stableford points, regardless of which format the event a round
+happens to be tagged to was set to; the two are entirely separate
+concerns that happen to both involve the word "Stableford."
+
+**Stroke Play ranks by lowest `total_net_stroke_play`, not gross** —
+this is a handicap-based society, and net is the standard way amateur
+competitions level the field. Stableford ranks by highest
+`total_stableford_points`, which is already handicap-adjusted by
+design.
+
+**Stroke Play additionally excludes any round with a picked-up hole**
+from the leaderboard entirely — a picked-up hole means
+`total_net_stroke_play` is only a partial sum of the holes actually
+completed (see `lib/golf-math.ts`'s `summarizeRound`), an incomplete
+score that can't fairly compete against a full round. Stableford has no
+equivalent problem: a picked-up hole scores 0 points, which is itself a
+valid, complete Stableford outcome by the format's own design, not a
+gap that needs excluding. Same reasoning as `getPlayerGrossScoreStats`
+in `app/actions/players.ts`, which excludes picked-up rounds from
+gross-score stats for an identical reason but never needed a Stableford
+counterpart.
+
+**A round links to an event at submission time, not afterward** — the
+round-logging form (`components/new-scorecard-form.tsx`) shows a "Log
+this round for an event?" dropdown, but only when there's a genuine
+match: an event the target player (self, or whoever an admin is logging
+for) is registered for, whose course and date match what's actually
+being submitted. `createScorecard` re-validates all of this server-side
+regardless of what the form sent — the event must exist, be published,
+match the round's course and date exactly, and the target player must
+actually be registered — since trusting a client-supplied event id could
+otherwise let a crafted request tag any round to any event and pollute
+its leaderboard.
+
+**The event-linking dropdown works for the admin "log on behalf of"
+case too, not just self.** The initial candidate-events list passed into
+the form is always the *viewer's* own registrations — when an admin
+switches who they're logging for, the form refetches that specific
+player's registered events client-side
+(`listRegisteredEventsForRoundLogging`), rather than requiring a
+separate page load or a pre-built map of every player's events (which
+would work but cost a query per player up front for something most
+players won't have any matches for on a given day).
+
 ## Members page: sort by handicap
 
 `/players` has a clickable "Handicap" header, same 3-state cycle and

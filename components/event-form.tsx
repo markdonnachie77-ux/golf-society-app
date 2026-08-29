@@ -13,6 +13,7 @@ export interface EventFormInitialData {
   firstTeeTime: string;
   capacity: number;
   selfRegistrationEnabled: boolean;
+  format: "stroke_play" | "stableford";
 }
 
 interface EventFormProps {
@@ -37,6 +38,9 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
   const [selfRegistrationEnabled, setSelfRegistrationEnabled] = React.useState(
     initial?.selfRegistrationEnabled ?? true
   );
+  const [format, setFormat] = React.useState<"stroke_play" | "stableford">(
+    initial?.format ?? "stableford"
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
@@ -54,6 +58,7 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("firstTeeTime", firstTeeTime);
     formData.set("capacity", capacity);
     formData.set("selfRegistrationEnabled", String(selfRegistrationEnabled));
+    formData.set("format", format);
 
     const result = await onSubmit(formData);
     if (!result.ok) {
@@ -151,6 +156,25 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           required
         />
         {fieldErrors.capacity && <p className="text-sm text-destructive">{fieldErrors.capacity}</p>}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="format">Scoring format</Label>
+        <select
+          id="format"
+          value={format}
+          onChange={(e) => setFormat(e.target.value as "stroke_play" | "stableford")}
+          disabled={pending}
+          className="flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 text-base text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+        >
+          <option value="stableford">Stableford (highest points wins)</option>
+          <option value="stroke_play">Stroke play (lowest net score wins)</option>
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Only governs how this event's leaderboard is ranked — handicap adjustments always use
+          Stableford points regardless of this setting.
+        </p>
+        {fieldErrors.format && <p className="text-sm text-destructive">{fieldErrors.format}</p>}
       </div>
 
       <label className="flex items-start gap-2.5">

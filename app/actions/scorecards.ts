@@ -141,6 +141,52 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
 
   const { courseId, teeColor, roundType, playedAt, playingHandicap } = parsed.data;
 
+  // Optional: this round can be tagged as played "for" an event the
+  // target player (self, or the admin's on-behalf target) is registered
+  // for. Validated fully here, not trusted from the client — the course
+  // and date must genuinely match the event, and the target player must
+  // actually be registered, or a crafted request could tag any round to
+  // any event and pollute its leaderboard.
+  const eventIdRaw = String(formData.get("eventId") ?? "").trim();
+  let linkedEventId: string | null = null;
+
+  if (eventIdRaw) {
+    if (!z.string().uuid().safeParse(eventIdRaw).success) {
+      return { ok: false, error: "Invalid event selected." };
+    }
+
+    const { data: event } = await supabase
+      .from("events")
+      .select("id, course_id, event_date, status")
+      .eq("id", eventIdRaw)
+      .eq("society_id", societyId)
+      .maybeSingle();
+
+    if (!event || event.status !== "published") {
+      return { ok: false, error: "That event could not be found." };
+    }
+    if (event.course_id !== courseId || event.event_date !== playedAt) {
+      return {
+        ok: false,
+        error: "This round's course and date don't match the selected event.",
+      };
+    }
+
+    const { data: registration } = await supabase
+      .from("event_registrations")
+      .select("id")
+      .eq("event_id", eventIdRaw)
+      .eq("player_id", targetPlayerId)
+      .eq("society_id", societyId)
+      .maybeSingle();
+
+    if (!registration) {
+      return { ok: false, error: "This player isn't registered for that event." };
+    }
+
+    linkedEventId = eventIdRaw;
+  }
+
   // Re-fetch the course + holes server-side — never trust totals computed
   // on the client. This is the authoritative calculation that gets
   // stored. Scoping by society_id here means a courseId belonging to a
@@ -217,6 +263,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
       proposed_handicap_change: change,
       status: "pending_approval",
       society_id: societyId,
+      event_id: linkedEventId,
     })
     .select("id")
     .single();

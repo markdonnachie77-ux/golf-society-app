@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
 import { listCoursesForRound } from "@/app/actions/scorecards";
 import { listAllPlayers } from "@/app/actions/players";
+import { listRegisteredEventsForRoundLogging } from "@/app/actions/events";
 import { getAppSettings } from "@/lib/app-settings";
 import { NewScorecardForm } from "@/components/new-scorecard-form";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -14,7 +15,7 @@ export default async function NewRoundPage() {
   const supabase = createServiceClient();
   const isAdmin = session.role === "admin";
 
-  const [courses, { data: player }, allPlayers, settings] = await Promise.all([
+  const [courses, { data: player }, allPlayers, settings, candidateEvents] = await Promise.all([
     listCoursesForRound(),
     supabase
       .from("players")
@@ -26,6 +27,10 @@ export default async function NewRoundPage() {
     // fetching the whole player directory for everyone else.
     isAdmin ? listAllPlayers() : Promise.resolve([]),
     getAppSettings(),
+    // Only the viewer's own registrations — if an admin switches who
+    // they're logging for, NewScorecardForm refetches this client-side
+    // for whichever player gets selected instead.
+    listRegisteredEventsForRoundLogging(session.playerId),
   ]);
 
   // Defense in depth: the dashboard already hides the "Log a round" link
@@ -65,6 +70,7 @@ export default async function NewRoundPage() {
                 viewerPlayerId={session.playerId}
                 isAdmin={isAdmin}
                 allPlayers={allPlayers}
+                initialCandidateEvents={candidateEvents}
               />
             </CardContent>
           </Card>

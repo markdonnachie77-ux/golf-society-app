@@ -6,7 +6,7 @@ import { requireSession, requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
 import type { ActionResult } from "@/app/actions/auth";
-import type { EventStatus } from "@/lib/database.types";
+import type { EventStatus, EventFormat } from "@/lib/database.types";
 
 // ---------- Shared helpers ----------
 
@@ -32,6 +32,9 @@ const eventDetailsSchema = z.object({
     .min(1, "Capacity must be at least 1")
     .max(500, "That capacity looks too high"),
   selfRegistrationEnabled: z.boolean(),
+  format: z.enum(["stroke_play", "stableford"], {
+    errorMap: () => ({ message: "Select a scoring format" }),
+  }),
 });
 
 function parseEventFormData(formData: FormData) {
@@ -42,6 +45,7 @@ function parseEventFormData(formData: FormData) {
     firstTeeTime: String(formData.get("firstTeeTime") ?? ""),
     capacity: Number(formData.get("capacity")),
     selfRegistrationEnabled: formData.get("selfRegistrationEnabled") === "true",
+    format: String(formData.get("format") ?? ""),
   });
 }
 
@@ -70,6 +74,7 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       first_tee_time: data.firstTeeTime,
       capacity: data.capacity,
       self_registration_enabled: data.selfRegistrationEnabled,
+      format: data.format,
       status: "draft",
       created_by: session.playerId,
       society_id: societyId,
@@ -118,6 +123,7 @@ export async function updateEvent(eventId: string, formData: FormData): Promise<
       first_tee_time: data.firstTeeTime,
       capacity: data.capacity,
       self_registration_enabled: data.selfRegistrationEnabled,
+      format: data.format,
       updated_at: new Date().toISOString(),
     })
     .eq("id", eventId)
@@ -287,6 +293,7 @@ export interface EventDetail {
   capacity: number;
   selfRegistrationEnabled: boolean;
   status: EventStatus;
+  format: EventFormat;
   courseId: string;
   courseName: string;
   registrations: { playerId: string; playerName: string; registeredBy: string }[];
@@ -305,7 +312,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const { data: event, error } = await supabase
     .from("events")
     .select(
-      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, course_id, courses(name)"
+      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, course_id, courses(name)"
     )
     .eq("id", eventId)
     .eq("society_id", societyId)
@@ -337,6 +344,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
     capacity: event.capacity,
     selfRegistrationEnabled: event.self_registration_enabled,
     status: event.status,
+    format: event.format,
     courseId: event.course_id,
     courseName: course?.name ?? "Unknown course",
     registrations: rawRegRows.map((r) => ({
@@ -501,4 +509,159 @@ export async function adminDeregisterPlayer(eventId: string, playerId: string): 
   }
 
   return { ok: true };
+}
+
+// ---------- Leaderboard ----------
+
+export interface LeaderboardEntry {
+  scorecardId: string;
+  playerId: string;
+  playerName: string;
+  score: number;
+  playedAt: string;
+}
+
+/**
+ * Ranks approved rounds tagged to this event by its format:
+ * stroke_play by lowest total_net_stroke_play, stableford by highest
+ * total_stableford_points. Only approved rounds count, same as
+ * everywhere else scores are aggregated in this app.
+ *
+ * Stroke play additionally excludes any round with a picked-up hole —
+ * total_net_stroke_play is only a partial sum for one of those (see
+ * lib/golf-math.ts's summarizeRound), an incomplete score that can't
+ * fairly compete. Stableford doesn't have this problem: a picked-up
+ * hole scores 0 points, which is itself a valid, complete outcome by
+ * Stableford's own design, so no exclusion applies there — same
+ * reasoning as getPlayerGrossScoreStats in app/actions/players.ts,
+ * which excludes picked-up rounds from gross-score stats for the same
+ * underlying reason but never needed a Stableford equivalent.
+ */
+export async function getEventLeaderboard(eventId: string): Promise<LeaderboardEntry[]> {
+  await requireSession();
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("format")
+    .eq("id", eventId)
+    .eq("society_id", societyId)
+    .maybeSingle();
+
+  if (!event) return [];
+
+  const { data, error } = await supabase
+    .from("scorecards")
+    .select(
+      "id, player_id, played_at, total_net_stroke_play, total_stableford_points, players!scorecards_player_id_fkey(first_name, last_name)"
+    )
+    .eq("event_id", eventId)
+    .eq("society_id", societyId)
+    .eq("status", "approved");
+
+  if (error || !data || data.length === 0) return [];
+
+  interface RawRow {
+    id: string;
+    player_id: string;
+    played_at: string;
+    total_net_stroke_play: number | null;
+    total_stableford_points: number | null;
+    players: { first_name: string; last_name: string } | null;
+  }
+  const rows = data as unknown as RawRow[];
+
+  let excludedIds = new Set<string>();
+  if (event.format === "stroke_play") {
+    const scorecardIds = rows.map((r) => r.id);
+    const { data: pickedUpRows } = await supabase
+      .from("scores")
+      .select("scorecard_id")
+      .in("scorecard_id", scorecardIds)
+      .eq("picked_up", true);
+    excludedIds = new Set((pickedUpRows ?? []).map((r) => r.scorecard_id));
+  }
+
+  const entries: LeaderboardEntry[] = [];
+  for (const r of rows) {
+    if (excludedIds.has(r.id)) continue;
+    const score = event.format === "stroke_play" ? r.total_net_stroke_play : r.total_stableford_points;
+    if (score === null) continue;
+    entries.push({
+      scorecardId: r.id,
+      playerId: r.player_id,
+      playerName: r.players ? `${r.players.first_name} ${r.players.last_name}` : "Unknown player",
+      score,
+      playedAt: r.played_at,
+    });
+  }
+
+  entries.sort((a, b) => (event.format === "stroke_play" ? a.score - b.score : b.score - a.score));
+
+  return entries;
+}
+
+// ---------- Linking a round to an event at submission time ----------
+
+export interface RegisteredEventOption {
+  id: string;
+  name: string;
+  eventDate: string;
+  courseId: string;
+}
+
+/**
+ * Events the given player is registered for, published, within a
+ * window of the last 7 days through any future date — used by the
+ * round-logging form to decide whether it's even worth offering "link
+ * this round to an event" at all. The form itself further narrows this
+ * down client-side to whichever of these actually match the round's
+ * selected course and date, so the dropdown only ever shows genuinely
+ * plausible matches, not every event the player happens to be signed up
+ * for.
+ *
+ * Not restricted to the caller's own id — event registrations are
+ * already visible to any logged-in society member on the event detail
+ * page itself (the "Who's registered" list shows everyone), so this
+ * isn't exposing anything more private than what's already shown there;
+ * an admin logging a round on behalf of another player needs exactly
+ * this same lookup for the target player, not just themselves.
+ */
+export async function listRegisteredEventsForRoundLogging(
+  playerId: string
+): Promise<RegisteredEventOption[]> {
+  await requireSession();
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const cutoff = sevenDaysAgo.toISOString().slice(0, 10);
+
+  const { data: regRows } = await supabase
+    .from("event_registrations")
+    .select("event_id")
+    .eq("player_id", playerId)
+    .eq("society_id", societyId);
+
+  const eventIds = (regRows ?? []).map((r) => r.event_id);
+  if (eventIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("events")
+    .select("id, name, event_date, course_id")
+    .in("id", eventIds)
+    .eq("society_id", societyId)
+    .eq("status", "published")
+    .gte("event_date", cutoff);
+
+  if (error || !data) return [];
+
+  return data.map((e) => ({
+    id: e.id,
+    name: e.name,
+    eventDate: e.event_date,
+    courseId: e.course_id,
+  }));
 }
