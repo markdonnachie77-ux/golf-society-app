@@ -67,7 +67,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
 
         {isAdmin && (
           <Card className="mb-6">
-            <CardContent className="pt-6">
+            <CardContent>
               <AdminEventStatusActions eventId={event.id} status={event.status} />
             </CardContent>
           </Card>
@@ -92,7 +92,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
 
         {isAdmin && (
           <Card className="mb-6">
-            <CardContent className="pt-6">
+            <CardContent>
               <AdminEventRegistrationManager
                 eventId={event.id}
                 players={players}
