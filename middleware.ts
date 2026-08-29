@@ -10,7 +10,13 @@ import { extractSubdomain } from "@/lib/tenant-resolution";
 const SESSION_COOKIE_NAME = "gs_session";
 
 const PUBLIC_PATHS = ["/login", "/register"];
-const ADMIN_PATH_PREFIXES = ["/admin", "/courses", "/players/new"];
+const ADMIN_PATH_PREFIXES = ["/admin", "/courses", "/players/new", "/events/new"];
+// /events/<id>/edit needs a pattern, not a plain prefix — the id sits in
+// the middle of the path, unlike /events/new or /players/new where
+// "admin-only" is the whole rest of the path from a fixed point. Scoped
+// tightly to exactly that shape so it never matches /events or
+// /events/<id> itself, both of which must stay open to every player.
+const EVENT_EDIT_PATH_RE = /^\/events\/[^/]+\/edit$/;
 
 // ---------------------------------------------------------------------------
 // Multi-tenant resolution
@@ -198,7 +204,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (ADMIN_PATH_PREFIXES.some((p) => pathname.startsWith(p)) && session.role !== "admin") {
+  const isAdminOnlyPath =
+    ADMIN_PATH_PREFIXES.some((p) => pathname.startsWith(p)) || EVENT_EDIT_PATH_RE.test(pathname);
+  if (isAdminOnlyPath && session.role !== "admin") {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

@@ -24,6 +24,7 @@ export type PlayerRole = "player" | "admin";
 export type TeeColor = "white" | "yellow";
 export type RoundType = "full_18" | "front_9" | "back_9";
 export type ScorecardStatus = "pending_approval" | "approved" | "rejected";
+export type EventStatus = "draft" | "published";
 
 export interface Database {
   public: {
@@ -336,6 +337,109 @@ export interface Database {
           },
           {
             foreignKeyName: "app_settings_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      events: {
+        Row: {
+          id: string;
+          society_id: string;
+          name: string;
+          course_id: string;
+          event_date: string;
+          first_tee_time: string;
+          capacity: number;
+          self_registration_enabled: boolean;
+          status: EventStatus;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          society_id: string;
+          name: string;
+          course_id: string;
+          event_date: string;
+          first_tee_time: string;
+          capacity: number;
+          self_registration_enabled?: boolean;
+          status?: EventStatus;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["events"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "events_course_id_fkey";
+            columns: ["course_id"];
+            isOneToOne: false;
+            referencedRelation: "courses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "events_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "players";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "events_society_id_fkey";
+            columns: ["society_id"];
+            isOneToOne: false;
+            referencedRelation: "societies";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      event_registrations: {
+        Row: {
+          id: string;
+          society_id: string;
+          event_id: string;
+          player_id: string;
+          registered_at: string;
+          registered_by: string;
+        };
+        Insert: {
+          id?: string;
+          society_id: string;
+          event_id: string;
+          player_id: string;
+          registered_at?: string;
+          registered_by: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["event_registrations"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "event_registrations_event_id_fkey";
+            columns: ["event_id"];
+            isOneToOne: false;
+            referencedRelation: "events";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "event_registrations_player_id_fkey";
+            columns: ["player_id"];
+            isOneToOne: false;
+            referencedRelation: "players";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "event_registrations_registered_by_fkey";
+            columns: ["registered_by"];
+            isOneToOne: false;
+            referencedRelation: "players";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "event_registrations_society_id_fkey";
             columns: ["society_id"];
             isOneToOne: false;
             referencedRelation: "societies";

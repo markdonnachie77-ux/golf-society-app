@@ -55,6 +55,9 @@ export default async function DashboardPage() {
             <Link href="/rounds">Rounds</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
+            <Link href="/events">Events</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
             <Link href="/players">Members</Link>
           </Button>
           {isAdmin && (

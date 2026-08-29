@@ -682,6 +682,94 @@ unrelated to table typing — so I don't expect the same class of issue,
 but it's worth knowing I'm reasoning from how the library is documented
 to behave here, not from having compiled it.
 
+## Event / competition management
+
+Admins draft an event (name, course, date, first tee time, capacity),
+edit it freely, then publish it — only published events are visible to
+players at all; a draft is invisible, not just non-registerable.
+Published events can be reverted to draft (registrations aren't touched
+by this — they'd just become invisible again until re-published).
+
+**Two new tables** (`supabase/migrations/0017_events.sql`): `events` and
+`event_registrations`. Both carry `society_id` directly, same
+defense-in-depth reasoning as every other table since the multi-tenancy
+work — a query scoped by `society_id` is correct on its own, not
+dependent on a join being right too.
+
+**Capacity is enforced by a Postgres function
+(`register_for_event`), not a plain application-level insert** — same
+reasoning as `0008_approval_functions.sql`'s `approve_scorecard`: two
+players clicking "register" at the same moment, with exactly one spot
+left, is a genuine race condition a check-then-insert from a Server
+Action can't safely rule out. The function locks the event row (`FOR
+UPDATE`) before checking capacity, which serializes concurrent
+registration attempts for that event — the second one only sees the
+count after the first has already committed (or not) its effect on that
+same locked row.
+
+**`p_skip_player_checks` is one flag controlling two checks** (the
+`self_registration_enabled` setting and the capacity limit), because
+both are specifically about *self*-service registration. An admin
+registering someone on their behalf isn't self-registration at all, so
+neither check applies to them — this was an explicit design choice
+(confirmed directly): admins can deliberately overbook an event past its
+stated capacity. Player self-registration always respects both.
+
+**De-registering yourself is always available**, regardless of
+`self_registration_enabled` — that setting only gates *adding* a new
+registration, not withdrawing an existing one. Removing a row has no
+capacity race condition to guard against either, so both
+`deregisterFromEvent` and the admin equivalent are plain scoped deletes,
+not RPC calls — only the capacity-checked *add* path needed the atomic
+function treatment.
+
+**Registering or de-registering for a past event is blocked**
+(`event.event_date < today`, checked in `app/actions/events.ts`) — using
+the server's own UTC date, same minor, accepted imprecision as
+`played_at`'s database default elsewhere in this app; someone right at
+a timezone boundary could see this cut over up to ~12 hours off from
+their own local midnight, which isn't worth solving with real timezone
+handling for a golf society's event list.
+
+**A draft event can never have registrations** (registration only opens
+once published, enforced by `register_for_event`'s own status check),
+which is what makes `deleteEvent`'s draft-only restriction safe — there's
+never a "what happens to existing registrations" question to answer for
+something that gets deleted, since a draft literally cannot have any.
+
+**Admin-only paths needed a small middleware addition beyond the usual
+prefix list**: `/events/new` is a plain prefix, same as `/players/new`,
+but `/events/<id>/edit` has the id sitting in the *middle* of the path,
+which a simple `.startsWith()` prefix can't express — `/events` and
+`/events/<id>` both need to stay open to every player. `middleware.ts`
+adds a small regex (`/^\/events\/[^/]+\/edit$/`) alongside the prefix
+list specifically for this shape, verified against both the paths it
+should and shouldn't match before shipping.
+
+**The events list splits into Upcoming and Past** rather than one flat
+list — `listEvents()` sorts ascending by date, which left as a single
+list would put every past event before every upcoming one on the page;
+the split (and reversing the past half to most-recent-first) happens in
+`app/events/page.tsx` itself rather than changing what the action
+returns. An event happening today counts as upcoming, not past.
+
+**Both foreign keys in `event_registrations` point at `players`**
+(`player_id` and `registered_by`) — an unqualified `players(...)` embed
+would be ambiguous to PostgREST the same way it once was in the approval
+queue and the rounds feed (`players!scorecards_player_id_fkey`), so
+`getEventDetail`'s select explicitly qualifies which one it means
+(`players!event_registrations_player_id_fkey`).
+
+I couldn't test this feature against a live database or run a real
+concurrent-registration race — no Postgres instance or browser available
+in the environment I built it in. I traced through the `register_for_event`
+function's logic by hand, including the locking behavior under
+concurrent calls, and I'm confident in the reasoning, but this is worth
+deliberately testing once deployed: two people registering for the last
+spot at nearly the same moment, an admin overbooking on purpose, a
+player withdrawing and re-registering, and reverting a published event
+back to draft.
+
 ## Members page: sort by handicap
 
 `/players` has a clickable "Handicap" header, same 3-state cycle and
