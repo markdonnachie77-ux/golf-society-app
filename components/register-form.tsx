@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { PinKeypad } from "@/components/pin-keypad";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,8 @@ import { registerPlayer } from "@/app/actions/auth";
 type Step = "details" | "pin" | "confirm-pin";
 
 export function RegisterForm() {
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next");
   const [step, setStep] = React.useState<Step>("details");
   const [firstName, setFirstName] = React.useState("");
   const [lastName, setLastName] = React.useState("");
@@ -61,6 +64,7 @@ export function RegisterForm() {
         formData.set("initialHandicap", initialHandicap);
         formData.set("pin", pin);
         formData.set("pinConfirm", pinConfirm);
+        if (next) formData.set("next", next);
 
         const result = await registerPlayer(formData);
         if (result && !result.ok) {

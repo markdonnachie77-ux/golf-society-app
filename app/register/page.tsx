@@ -1,11 +1,18 @@
+import { Suspense } from "react";
 import { RegisterForm } from "@/components/register-form";
 import { getAppSettings } from "@/lib/app-settings";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 import { AuthHeroPhoto } from "@/components/auth-hero-photo";
 
-export default async function RegisterPage() {
+export default async function RegisterPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
   const settings = await getAppSettings();
+  const { next } = await searchParams;
+  const loginHref = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
 
   return (
     <main className="flex min-h-screen">
@@ -28,7 +35,9 @@ export default async function RegisterPage() {
             </CardHeader>
             <CardContent>
               {settings.playersCanSelfRegister ? (
-                <RegisterForm />
+                <Suspense fallback={null}>
+                  <RegisterForm />
+                </Suspense>
               ) : (
                 <p className="text-sm text-muted-foreground">
                   Registration is currently closed. Contact an admin to be added.
@@ -39,7 +48,7 @@ export default async function RegisterPage() {
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Already registered?{" "}
-            <a href="/login" className="font-medium text-primary underline underline-offset-2">
+            <a href={loginHref} className="font-medium text-primary underline underline-offset-2">
               Log in
             </a>
           </p>

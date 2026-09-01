@@ -40,6 +40,31 @@ export interface ActionResult {
   fieldErrors?: Record<string, string>;
 }
 
+/**
+ * Used by both loginPlayer and registerPlayer to decide where to send
+ * someone after success, instead of always hardcoding "/dashboard" —
+ * needed so scanning an event sign-up QR code while logged out actually
+ * lands back on that event after authenticating, not just the dashboard.
+ *
+ * Never trusts the value outright — honoring an arbitrary "next" from a
+ * query string is a classic open-redirect vulnerability: a link could
+ * disguise itself as this app's own login page while quietly sending
+ * someone elsewhere the moment they authenticate. Only a same-app
+ * relative path is accepted; anything else (an absolute URL, a
+ * protocol-relative "//evil.com" trick, a bare scheme) falls back to the
+ * default. Also rejects /login or /register themselves as a next
+ * target — redirecting a freshly-authenticated session straight back to
+ * the login/register page makes no sense as a destination.
+ */
+function safeNextPath(value: FormDataEntryValue | null): string {
+  const path = typeof value === "string" ? value : "";
+  if (!path.startsWith("/") || path.startsWith("//")) return "/dashboard";
+  if (path === "/login" || path === "/register" || path.startsWith("/login?") || path.startsWith("/register?")) {
+    return "/dashboard";
+  }
+  return path;
+}
+
 export async function registerPlayer(formData: FormData): Promise<ActionResult> {
   // The actual boundary for the players_can_self_register setting —
   // /register hiding its form when this is off is just UX. Checked
@@ -111,7 +136,7 @@ export async function registerPlayer(formData: FormData): Promise<ActionResult> 
   const token = await createSessionToken({ playerId: player.id, role: player.role, societyId });
   await setSessionCookie(token);
 
-  redirect("/dashboard");
+  redirect(safeNextPath(formData.get("next")));
 }
 
 // ---------- Admin-created players ----------
@@ -307,7 +332,7 @@ export async function loginPlayer(formData: FormData): Promise<ActionResult> {
   const token = await createSessionToken({ playerId: player.id, role: player.role, societyId });
   await setSessionCookie(token);
 
-  redirect("/dashboard");
+  redirect(safeNextPath(formData.get("next")));
 }
 
 // ---------- Logout ----------

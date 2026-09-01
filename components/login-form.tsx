@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { PlayerSelect } from "@/components/player-select";
 import { PinKeypad } from "@/components/pin-keypad";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,8 @@ interface Player {
 }
 
 export function LoginForm({ players }: { players: Player[] }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const next = searchParams.get("next");
   const [playerId, setPlayerId] = React.useState<string | null>(null);
   const [pin, setPin] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
@@ -31,6 +31,7 @@ export function LoginForm({ players }: { players: Player[] }) {
     const formData = new FormData();
     formData.set("playerId", playerId);
     formData.set("pin", pin);
+    if (next) formData.set("next", next);
 
     const result = await loginPlayer(formData);
     // If loginPlayer succeeded it calls redirect() server-side and this
@@ -81,7 +82,10 @@ export function LoginForm({ players }: { players: Player[] }) {
 
       <p className="text-sm text-muted-foreground">
         New to the society?{" "}
-        <a href="/register" className="font-medium text-primary underline underline-offset-2">
+        <a
+          href={next ? `/register?next=${encodeURIComponent(next)}` : "/register"}
+          className="font-medium text-primary underline underline-offset-2"
+        >
           Register here
         </a>
       </p>
