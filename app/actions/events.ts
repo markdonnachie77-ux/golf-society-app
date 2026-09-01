@@ -665,3 +665,70 @@ export async function listRegisteredEventsForRoundLogging(
     courseId: e.course_id,
   }));
 }
+
+// ---------- Dashboard "log your round" reminder ----------
+
+export interface PendingEventReminder {
+  id: string;
+  name: string;
+  eventDate: string;
+}
+
+/**
+ * Events the player is registered for, published, dated today or up to
+ * 7 days in the past — same window listRegisteredEventsForRoundLogging
+ * uses for the round-linking dropdown itself, deliberately: a round
+ * genuinely can't be tagged to anything older than that window anyway
+ * (the dropdown wouldn't offer it), so there's no point reminding about
+ * something that's no longer linkable. Excludes any event the player
+ * has already submitted a round for, regardless of that round's
+ * approval status — once they've logged something, they've done their
+ * part; a still-pending or even rejected round isn't a reason to keep
+ * nagging them to log it again.
+ */
+export async function listPendingEventRoundReminders(playerId: string): Promise<PendingEventReminder[]> {
+  await requireSession();
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
+
+  const today = new Date().toISOString().slice(0, 10);
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const cutoff = sevenDaysAgo.toISOString().slice(0, 10);
+
+  const { data: regRows } = await supabase
+    .from("event_registrations")
+    .select("event_id")
+    .eq("player_id", playerId)
+    .eq("society_id", societyId);
+
+  const eventIds = (regRows ?? []).map((r) => r.event_id);
+  if (eventIds.length === 0) return [];
+
+  const { data: events, error } = await supabase
+    .from("events")
+    .select("id, name, event_date")
+    .in("id", eventIds)
+    .eq("society_id", societyId)
+    .eq("status", "published")
+    .gte("event_date", cutoff)
+    .lte("event_date", today);
+
+  if (error || !events || events.length === 0) return [];
+
+  const { data: existingRounds } = await supabase
+    .from("scorecards")
+    .select("event_id")
+    .eq("player_id", playerId)
+    .eq("society_id", societyId)
+    .in(
+      "event_id",
+      events.map((e) => e.id)
+    );
+
+  const alreadyLoggedEventIds = new Set((existingRounds ?? []).map((r) => r.event_id));
+
+  return events
+    .filter((e) => !alreadyLoggedEventIds.has(e.id))
+    .map((e) => ({ id: e.id, name: e.name, eventDate: e.event_date }));
+}

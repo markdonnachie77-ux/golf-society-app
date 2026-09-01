@@ -4,18 +4,20 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
 import { getAppSettings } from "@/lib/app-settings";
 import { getPlayerGrossScoreStats } from "@/app/actions/players";
+import { listPendingEventRoundReminders } from "@/app/actions/events";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 import { LogoutButton } from "@/components/logout-button";
 import { GrossScoreStatsCard } from "@/components/gross-score-stats-card";
+import { EventRoundReminderBanner } from "@/components/event-round-reminder-banner";
 
 export default async function DashboardPage() {
   const session = await requireSession();
   const societyId = await getCurrentSocietyId();
   const supabase = createServiceClient();
 
-  const [{ data: player }, settings, grossScoreStats] = await Promise.all([
+  const [{ data: player }, settings, grossScoreStats, eventReminders] = await Promise.all([
     supabase
       .from("players")
       .select("first_name, last_name, current_handicap, role")
@@ -24,6 +26,7 @@ export default async function DashboardPage() {
       .single(),
     getAppSettings(),
     getPlayerGrossScoreStats(session.playerId),
+    listPendingEventRoundReminders(session.playerId),
   ]);
 
   const isAdmin = player?.role === "admin";
@@ -41,6 +44,8 @@ export default async function DashboardPage() {
           </div>
           <LogoutButton />
         </div>
+
+        <EventRoundReminderBanner reminders={eventReminders} />
 
         <nav className="mb-8 flex flex-wrap gap-2">
           {canLogRounds && (

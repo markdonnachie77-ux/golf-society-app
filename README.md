@@ -818,6 +818,34 @@ separate page load or a pre-built map of every player's events (which
 would work but cost a query per player up front for something most
 players won't have any matches for on a given day).
 
+### Dashboard "log your round" reminder
+
+If you're registered for a published event dated today or up to 7 days
+in the past, and you haven't submitted a round for it yet, a dismissible
+banner shows on the dashboard. Same 7-day window as the round-linking
+dropdown itself (`listRegisteredEventsForRoundLogging`) — deliberately,
+since a round genuinely can't be tagged to anything older than that
+window anyway (the dropdown wouldn't offer it as an option), so there's
+no point reminding about something that's no longer linkable.
+
+"Already submitted a round" means any status — pending, approved, or
+even rejected — not just approved. Once you've logged something for an
+event, you've done your part; a still-pending or rejected round isn't a
+reason to keep nagging.
+
+**Dismissal is stored in `localStorage`, per event id** — a deliberate
+choice, not database-backed. It's a lightweight, per-device UI
+preference, not something that needs to sync across devices or survive
+a data export. It's also only ever a "not right now" — if you dismiss
+the banner but still haven't logged a round after 7 days, the reminder
+disappears anyway (superseded by the date window), and if you do log a
+round, `listPendingEventRoundReminders` stops returning it at all
+regardless of dismissal state. This is the first thing in the app to use
+`localStorage` at all — everywhere else state either lives in the
+database or in a URL query param, since this is genuinely the first
+case where neither fit: too trivial for a database round-trip, and not
+meaningful to put in a shareable URL.
+
 ## Members page: sort by handicap
 
 `/players` has a clickable "Handicap" header, same 3-state cycle and
