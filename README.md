@@ -846,6 +846,43 @@ database or in a URL query param, since this is genuinely the first
 case where neither fit: too trivial for a database round-trip, and not
 meaningful to put in a shareable URL.
 
+## Header-less card padding — three attempts, only the third one right
+
+Worth documenting honestly, since it took three tries across several
+sessions to actually fix, and the lesson generalizes: `CardContent`'s
+own base classes are `p-4 pt-0 sm:p-6 sm:pt-0` — zero top padding at
+every breakpoint, deliberately, because `CardContent` is normally used
+right below a `CardHeader`, which already provides its own bottom
+spacing. The two admin-only cards on the event page (the status-actions
+toolbar and the register-a-player panel) have no `CardHeader` at all —
+just a bare `CardContent` — so that zeroed top padding left their
+content sitting flush against the top with a full padding's worth of
+gap only at the bottom, looking top-aligned rather than centered.
+
+**Attempt 1** added `className="pt-6"` (no breakpoint prefix) to
+compensate. This looked like it helped in isolated review, but never
+actually took effect at desktop width — `cn()` uses `tailwind-merge`,
+which correctly overrides conflicting classes *at the same breakpoint*,
+and a bare `pt-6` only overrides the bare `pt-0`, not `sm:pt-0`. Past
+640px, `sm:pt-0` kept winning regardless.
+
+**Attempt 2** removed the override entirely, reasoning that
+`CardContent`'s own default must be correct — but the default is only
+correct for the header-below-content case, not the header-less case
+these two cards actually are. This didn't change anything either, for
+the same underlying reason: neither attempt had ever touched `sm:pt-0`
+at the breakpoint that mattered.
+
+**Attempt 3**, found by the user directly in browser DevTools (editing
+the computed `sm:pt-0` rule and watching the layout fix itself), is
+`className="pt-4 sm:pt-6"` — matching `p-4`/`sm:p-6`'s own top-padding
+value at each breakpoint, restoring symmetric padding on all four
+sides. This is the one that's actually correct, applied to both
+header-less cards. If another header-less `CardContent` gets added to
+this app later, it needs the same explicit override — the bare
+`CardContent` default is wrong for that shape by design, not by
+oversight.
+
 ## Event sign-up PDF (`/events/<id>/pdf`)
 
 For societies that still put a printed sheet on the noticeboard: admins
