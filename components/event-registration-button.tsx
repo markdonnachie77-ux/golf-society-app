@@ -20,6 +20,25 @@ export function EventRegistrationButton({
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // router.refresh() isn't awaitable (it returns void, confirmed against
+  // this Next.js version's own type definitions) — there's no way to
+  // know from the call site alone when the re-fetch has actually landed.
+  // Resetting pending immediately after the action succeeds, before that
+  // refresh completes, causes a real, visible bug: the button briefly
+  // flashes back to its OLD, pre-action state (confirmed via a recorded
+  // repro — clicking Register showed "Registering…", then flashed back
+  // to "Register" for about a second, before finally landing on "Withdraw
+  // my registration" once the refreshed data arrived). Watching the
+  // server-provided isRegistered prop itself and resetting only when it
+  // actually changes ties the reset to when the UI genuinely has correct
+  // data, avoiding both that flash and the original bug this replaced
+  // (never resetting at all, which left the new button stuck disabled
+  // forever). Also covers the initial mount, but setting an already-false
+  // value to false again is a no-op.
+  React.useEffect(() => {
+    setPending(false);
+  }, [isRegistered]);
+
   async function handleRegister() {
     setPending(true);
     setError(null);
@@ -29,14 +48,6 @@ export function EventRegistrationButton({
       setPending(false);
       return;
     }
-    // router.refresh() re-fetches server data and re-renders with new
-    // props (isRegistered flips to true, switching to the other branch
-    // below) — but it's the same component instance, so its own state
-    // persists across that. Without resetting pending here, the
-    // withdraw button that renders next would inherit pending=true left
-    // over from registering, rendering permanently as "Removing…" and
-    // disabled even though nothing is actually in progress.
-    setPending(false);
     router.refresh();
   }
 
@@ -49,11 +60,6 @@ export function EventRegistrationButton({
       setPending(false);
       return;
     }
-    // Same reasoning as handleRegister above, mirrored: without this,
-    // the register button that renders after a successful withdrawal
-    // would inherit this leftover pending=true and get stuck showing
-    // "Registering…", disabled, forever.
-    setPending(false);
     router.refresh();
   }
 

@@ -885,6 +885,33 @@ state, so the stale `pending` had nothing left to stick to. Fixed
 anyway for consistency with the pattern everywhere else, and to close
 the brief window before that refresh actually lands.
 
+**Follow-up: that fix itself introduced a new, visible bug**, caught via
+a screen recording rather than assumed fixed. Resetting `pending`
+immediately after the action succeeds — before `router.refresh()`
+actually completes — means the button briefly renders in its OLD,
+pre-action state, since the new `isRegistered`/`status` prop hasn't
+arrived yet. Frame-by-frame review of the recording showed exactly
+this: click Register → "Registering…" → flashes back to "Register" for
+roughly a second → finally settles on "Withdraw my registration" once
+the refreshed data lands. `router.refresh()` returns `void`, confirmed
+against this Next.js version's own type definitions — it isn't
+awaitable, so there's no way to know from the call site when it's
+actually done.
+
+The actual fix, in both `EventRegistrationButton` and
+`AdminEventStatusActions`: don't reset `pending` in the handler's
+success path at all. Instead, a `useEffect` watches the server-provided
+prop itself (`isRegistered`, `status`) and resets `pending` only once
+that prop actually changes — which only happens when the refreshed data
+has genuinely arrived. This ties the reset to real confirmed state
+rather than a guess about timing, avoiding both failure modes at once:
+the original stuck-forever bug (never resetting), and this flash (reset
+too early). A `useEffect` (not `useLayoutEffect`, which would need to
+avoid a Next.js SSR warning) fires after paint, so there's a
+theoretical single-frame flash still possible in principle — accepted
+as an imperceptible tradeoff against the multi-second, clearly visible
+flash this replaces.
+
 ## Header-less card padding — three attempts, only the third one right
 
 Worth documenting honestly, since it took three tries across several
