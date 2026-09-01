@@ -907,6 +907,34 @@ yet. Verified with a real compiled run of the actual template file
 example above, plus the zero-registered case to confirm the section
 disappears cleanly rather than rendering an empty heading.
 
+**The whole sheet always fits on one A4 page**, up to a real, tested
+ceiling — this replaced an earlier, incorrect assumption. The original
+30-row cap on blank rows was chosen before the "Already signed up" table
+existed, and never accounted for it: once that table was added, the
+combined content could genuinely overflow to a second page well below
+that cap. Row height, cell padding, and body-cell font size in both
+tables now scale down together (not row height alone, which would leave
+text overflowing a now-shorter row) once the total row count — registered
+shown plus blank shown, combined across both tables, since they share
+the same page — exceeds a threshold, down to a legibility floor a
+hand-write box can't usefully shrink past.
+
+Both the "fits comfortably at full size" threshold (13 total rows) and
+the "still fits at the legibility floor" ceiling (22 total rows) are
+**measured, not calculated** — rendered real PDFs at increasing row
+counts using the actual template file (compiled with esbuild, not a
+reimplementation) and counted actual pages with `pdf-lib`, across short
+names, long/wrapping names, and the all-registered/zero-blank edge case,
+for both boundaries. 22 fits everywhere tested, 23 tips to a second page
+everywhere tested. Beyond a total of 22, blank rows are trimmed first —
+already-registered names always all get shown in full, even if an
+unusually popular event (more than 22 people registered through the app
+alone) means the sheet occasionally can't stay on one page after all;
+hiding real registrations to force a page count would be a worse
+tradeoff than that rare exception. If this template's other content
+(header size, section text, margins) ever changes materially, both
+numbers should be re-measured the same way, not adjusted by guess.
+
 **Verification note, since this was genuinely new territory for the
 app**: I don't have a live Next.js dev server or browser in the
 environment I build in, so I couldn't click through the actual download
