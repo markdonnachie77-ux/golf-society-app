@@ -895,6 +895,18 @@ sheet would be misleading about how full the event actually is. Verified
 against both of the exact examples above plus the overbooking edge case
 (zero numbered rows, not a crash or negative numbers).
 
+**An "Already signed up" table lists everyone registered through the
+app**, above the hand-write section — just `#` and Name, numbered 1
+through `registeredCount`. This is what makes the numbering above
+genuinely continuous rather than two separately-numbered lists: someone
+glancing at the sheet sees one sequential roster, spots 1 through
+capacity, some filled in print and the rest blank for hand-writing.
+Omitted entirely (not shown as an empty table) when nobody's registered
+yet. Verified with a real compiled run of the actual template file
+(not a reimplementation) against the exact 16-capacity/13-registered
+example above, plus the zero-registered case to confirm the section
+disappears cleanly rather than rendering an empty heading.
+
 **Verification note, since this was genuinely new territory for the
 app**: I don't have a live Next.js dev server or browser in the
 environment I build in, so I couldn't click through the actual download

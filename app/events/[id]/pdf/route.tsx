@@ -67,6 +67,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       formatLabel={EVENT_FORMAT_LABEL[event.format]}
       capacity={event.capacity}
       registeredCount={event.registrations.length}
+      registeredPlayerNames={event.registrations.map((r) => r.playerName)}
       qrDataUrl={qrDataUrl}
       signUpUrl={signUpUrl}
     />

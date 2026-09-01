@@ -39,6 +39,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   cellName: { flex: 2, padding: 6, borderRightWidth: 1, borderRightColor: "#cccccc" },
+  cellNameOnly: { flex: 1, padding: 6 },
   cellContact: { flex: 2, padding: 6, borderRightWidth: 1, borderRightColor: "#cccccc" },
   cellHandicap: { flex: 1, padding: 6 },
   headerCellText: { fontSize: 10, fontWeight: "bold" },
@@ -59,6 +60,7 @@ export interface EventSignUpPdfProps {
   formatLabel: string;
   capacity: number;
   registeredCount: number;
+  registeredPlayerNames: string[];
   qrDataUrl: string;
   signUpUrl: string;
 }
@@ -79,6 +81,7 @@ export function EventSignUpPdf({
   formatLabel,
   capacity,
   registeredCount,
+  registeredPlayerNames,
   qrDataUrl,
   signUpUrl,
 }: EventSignUpPdfProps) {
@@ -119,6 +122,24 @@ export function EventSignUpPdf({
             <Text style={styles.qrCaption}>Scan with your phone to sign up</Text>
           </View>
         </View>
+
+        {registeredPlayerNames.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Already signed up:</Text>
+            <View style={[styles.table, { marginBottom: 20 }]}>
+              <View style={styles.headerRow}>
+                <Text style={[styles.cellNumber, styles.headerCellText]}>#</Text>
+                <Text style={[styles.cellNameOnly, styles.headerCellText]}>Name</Text>
+              </View>
+              {registeredPlayerNames.map((name, i) => (
+                <View style={styles.bodyRow} key={i}>
+                  <Text style={styles.cellNumber}>{i + 1}</Text>
+                  <Text style={styles.cellNameOnly}>{name}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
 
         <Text style={styles.sectionTitle}>Can&apos;t use the app? Sign up here:</Text>
         <Text style={styles.sectionSubtitle}>
