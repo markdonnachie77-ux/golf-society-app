@@ -54,6 +54,24 @@ const nextConfig = {
     serverActions: {
       allowedOrigins,
     },
+    // pdfkit (used internally by @react-pdf/renderer — see
+    // lib/event-signup-pdf.tsx / app/events/[id]/pdf/route.tsx) ships its
+    // standard PDF fonts (Helvetica, Courier, etc.) as separate .cjs data
+    // files rather than inline code. Vercel's serverless bundler works
+    // out which files to include per-route by statically tracing what
+    // the code imports, and pdfkit loads these ones by a path its
+    // analysis doesn't reliably follow — without this, the deployed
+    // function throws "Cannot find module
+    // '.../pdfkit/js/standard-fonts/Helvetica.cjs'" the moment it tries
+    // to render a document, even though everything works fine locally
+    // (where every file in node_modules is already on disk regardless
+    // of whether anything traced it). This is pdfkit's own documented
+    // breaking change as of 0.20.0 (previously these were loaded via a
+    // virtual file system that didn't have this problem), not something
+    // specific to this app.
+    outputFileTracingIncludes: {
+      "/events/[id]/pdf": ["./node_modules/pdfkit/js/standard-fonts/**/*"],
+    },
   },
   images: {
     remotePatterns,
