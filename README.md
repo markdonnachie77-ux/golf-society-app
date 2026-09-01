@@ -846,6 +846,45 @@ database or in a URL query param, since this is genuinely the first
 case where neither fit: too trivial for a database round-trip, and not
 meaningful to put in a shareable URL.
 
+## Stuck "Removing…" / "Reverting…" buttons after a successful action
+
+Real bug, found via the QR-code sign-up flow: register for an event,
+and the button that should say "Withdraw my registration" instead
+renders permanently as "Removing…", disabled, doing nothing.
+
+The cause: `EventRegistrationButton` renders one of two different
+buttons depending on `isRegistered` — Register, or Withdraw. Both
+handlers call `router.refresh()` on success to re-fetch server data and
+get the prop that flips which branch renders. But `router.refresh()`
+re-renders the *same component instance* with new props — it doesn't
+remount it — so the component's own `pending` state carries straight
+across that branch switch. Neither handler ever reset `pending` back to
+`false` on success, only on failure, so a successful *register* left
+`pending` stuck `true` at the exact moment the component switched to
+rendering the *withdraw* button, which read that stale flag and showed
+its own "Removing…" text, disabled, forever — since the button being
+disabled meant there was no way to click it and clear the state either.
+
+**Checked this pattern everywhere else it's used in the app** rather
+than fixing only the reported instance — six other components use the
+identical `setPending(true)` → action → `router.refresh()` shape
+(hero photo upload, wipe history, reset PIN, brand colors, setting
+toggles, handicap override), and every single one of them already
+resets `pending` before refreshing. That confirms this was a genuine
+oversight isolated to the event-registration components specifically,
+not a systemic gap — all of them were written in the same batch of
+work, and all three needed the same fix: `EventRegistrationButton`
+(both handlers — this is the one that was actually reported, but
+withdrawing and then re-registering would have hit the mirror image of
+the same bug), and `AdminEventStatusActions`'s publish/unpublish
+handlers, which switch between "Publish" and "Revert to draft" the
+same way. `AdminRemoveRegistrationButton` had the same gap but never
+actually surfaced it visibly — that button's whole row disappears from
+the list on success rather than switching to a different rendered
+state, so the stale `pending` had nothing left to stick to. Fixed
+anyway for consistency with the pattern everywhere else, and to close
+the brief window before that refresh actually lands.
+
 ## Header-less card padding — three attempts, only the third one right
 
 Worth documenting honestly, since it took three tries across several

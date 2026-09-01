@@ -22,6 +22,13 @@ export function AdminEventStatusActions({ eventId, status }: { eventId: string; 
       setPending(false);
       return;
     }
+    // Same reasoning as EventRegistrationButton's fix — status flips to
+    // "published" here, switching which of Publish/Revert-to-draft
+    // renders below, but it's the same component instance carrying its
+    // own pending state across that. Without this, "Revert to draft"
+    // would render stuck on "Reverting…", disabled, immediately after a
+    // successful publish that never touched unpublish at all.
+    setPending(false);
     router.refresh();
   }
 
@@ -34,6 +41,8 @@ export function AdminEventStatusActions({ eventId, status }: { eventId: string; 
       setPending(false);
       return;
     }
+    // Mirrors handlePublish above.
+    setPending(false);
     router.refresh();
   }
 

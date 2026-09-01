@@ -92,6 +92,14 @@ export function AdminRemoveRegistrationButton({
       setPending(false);
       return;
     }
+    // This row disappears from the list entirely once the refresh
+    // completes (the removed player is no longer in
+    // event.registrations), so unlike the other fixes in this pass this
+    // one doesn't cause a visibly stuck button — the component unmounts
+    // instead. Resetting anyway for consistency with the established
+    // pattern and to avoid a button stuck disabled during whatever gap
+    // exists before that refresh actually lands.
+    setPending(false);
     router.refresh();
   }
 

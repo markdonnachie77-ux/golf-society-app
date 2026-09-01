@@ -29,6 +29,14 @@ export function EventRegistrationButton({
       setPending(false);
       return;
     }
+    // router.refresh() re-fetches server data and re-renders with new
+    // props (isRegistered flips to true, switching to the other branch
+    // below) — but it's the same component instance, so its own state
+    // persists across that. Without resetting pending here, the
+    // withdraw button that renders next would inherit pending=true left
+    // over from registering, rendering permanently as "Removing…" and
+    // disabled even though nothing is actually in progress.
+    setPending(false);
     router.refresh();
   }
 
@@ -41,6 +49,11 @@ export function EventRegistrationButton({
       setPending(false);
       return;
     }
+    // Same reasoning as handleRegister above, mirrored: without this,
+    // the register button that renders after a successful withdrawal
+    // would inherit this leftover pending=true and get stuck showing
+    // "Registering…", disabled, forever.
+    setPending(false);
     router.refresh();
   }
 
