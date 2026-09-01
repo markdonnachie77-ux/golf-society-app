@@ -31,6 +31,13 @@ const styles = StyleSheet.create({
     borderBottomColor: "#cccccc",
     minHeight: 26,
   },
+  cellNumber: {
+    width: 28,
+    padding: 6,
+    borderRightWidth: 1,
+    borderRightColor: "#cccccc",
+    textAlign: "center",
+  },
   cellName: { flex: 2, padding: 6, borderRightWidth: 1, borderRightColor: "#cccccc" },
   cellContact: { flex: 2, padding: 6, borderRightWidth: 1, borderRightColor: "#cccccc" },
   cellHandicap: { flex: 1, padding: 6 },
@@ -120,12 +127,19 @@ export function EventSignUpPdf({
 
         <View style={styles.table}>
           <View style={styles.headerRow}>
+            <Text style={[styles.cellNumber, styles.headerCellText]}>#</Text>
             <Text style={[styles.cellName, styles.headerCellText]}>Name</Text>
             <Text style={[styles.cellContact, styles.headerCellText]}>Phone / email</Text>
             <Text style={[styles.cellHandicap, styles.headerCellText]}>Handicap</Text>
           </View>
           {Array.from({ length: blankRows }).map((_, i) => (
             <View style={styles.bodyRow} key={i}>
+              {/* Continues the numbering from wherever app registrations
+                  left off — spot 14 of 16 if 13 are already registered,
+                  not 1 of 3 — since these rows represent specific
+                  remaining spots at the event, not just "however many
+                  blank rows happened to fit on the page". */}
+              <Text style={styles.cellNumber}>{registeredCount + i + 1}</Text>
               <Text style={styles.cellName} />
               <Text style={styles.cellContact} />
               <Text style={styles.cellHandicap} />

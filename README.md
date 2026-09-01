@@ -884,6 +884,17 @@ negative })` throws in JavaScript rather than producing an empty array —
 verified this specific case directly rather than assuming the floor was
 unnecessary.
 
+**Each blank row is numbered with its actual spot number, continuing
+from wherever app registrations left off** — 16 spaces with none taken
+prints rows 1–16; 16 spaces with 13 already registered through the app
+prints rows 14–16, not 1–3. The number is `registeredCount + i + 1` for
+each row's position in the printed list, not just a plain 1-to-N count
+of however many rows happen to fit — these represent specific remaining
+spots at the event, and a walk-up signing in spot "3" of a mostly-full
+sheet would be misleading about how full the event actually is. Verified
+against both of the exact examples above plus the overbooking edge case
+(zero numbered rows, not a crash or negative numbers).
+
 **Verification note, since this was genuinely new territory for the
 app**: I don't have a live Next.js dev server or browser in the
 environment I build in, so I couldn't click through the actual download
