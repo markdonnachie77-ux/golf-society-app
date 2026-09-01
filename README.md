@@ -846,6 +846,113 @@ database or in a URL query param, since this is genuinely the first
 case where neither fit: too trivial for a database round-trip, and not
 meaningful to put in a shareable URL.
 
+## Event sign-up PDF (`/events/<id>/pdf`)
+
+For societies that still put a printed sheet on the noticeboard: admins
+get a "Download sign-up sheet" link on a *published* event's page (not
+shown for drafts — a draft's QR code would point at something invisible
+to everyone but admins). The PDF has the event's details, a QR code
+linking straight to that event's page, and a hand-write table at the
+bottom for anyone who can't or won't use the app.
+
+**First thing in this app to generate a PDF at all** — new dependencies
+`@react-pdf/renderer` (the document itself, `lib/event-signup-pdf.tsx`)
+and `qrcode` (`app/events/[id]/pdf/route.tsx`). This is a Route Handler,
+not a Server Action — a Server Action can't hand back a binary file for
+the browser to download the way a Route Handler's `Response` naturally
+can. `requireAdmin()` is used here exactly as its own doc comment says
+it's meant to be (Server Actions *and* Route Handlers), wrapped in a
+try/catch since it throws rather than redirecting — appropriate for a
+page, not for a file-download endpoint.
+
+**The QR code's target URL only works because of a separate fix that
+had to happen first**: scanning it while logged out needs to land back
+on the event page after logging in or registering, not just the
+dashboard — see "Login/register now honor a next redirect" below, which
+this feature is the actual reason for building.
+
+**The hand-write table's row count is capacity minus however many have
+already registered through the app** (capped at 30 regardless, so a
+large capacity doesn't produce an absurdly long printed page) — not the
+full capacity. This sheet exists for people who can't use the app, so
+rows for spots already filled by app registrations would overstate how
+much room is actually left. Worth knowing: without the `Math.max(0,
+...)` floor on this calculation, an admin-overbooked event (capacity
+deliberately exceeded — see the earlier registration-override work)
+would compute a *negative* row count, and `Array.from({ length:
+negative })` throws in JavaScript rather than producing an empty array —
+verified this specific case directly rather than assuming the floor was
+unnecessary.
+
+**Verification note, since this was genuinely new territory for the
+app**: I don't have a live Next.js dev server or browser in the
+environment I build in, so I couldn't click through the actual download
+end to end. What I did do: tested the real QR-generation and
+PDF-rendering calls directly under plain Node (not the project's `tsx`
+test runner, which turned out to have its own unrelated ESM/CommonJS
+resolution quirks with this exact package that don't reflect how
+Next.js's own bundler handles it), confirmed the specific styling
+patterns used here (style-array merging, borders, flexbox rows) render
+correctly, ran the blank-row math against the overbooking edge case
+above, and ran a full `tsc --noEmit` across the whole project with zero
+errors. I also confirmed directly against Next.js's own documentation
+that `@react-pdf/renderer` is on its built-in list of packages
+automatically handled correctly for Server Components and Route
+Handlers, and that the historical Next.js/react-pdf crash bug some
+older setups hit only affected Next.js versions before 14.1.1 — this
+app is on 15.5.25. That's a lot of indirect confidence, not a substitute
+for actually clicking the button once this is deployed — worth doing
+that deliberately as the first real test.
+
+Also worth knowing: installing `qrcode` surfaced that it doesn't ship
+its own TypeScript types, needing a separate `@types/qrcode` dev
+dependency — caught by the same `tsc --noEmit` check, before it could
+have failed a real Vercel build.
+
+## Login/register now honor a `next` redirect param
+
+This exists specifically to make the sign-up PDF's QR code work while
+logged out: scanning it needs to land back on the event page after
+authenticating, not just the dashboard. `LoginForm` already had
+`useSearchParams` imported — unused, dead code, presumably from an
+earlier unfinished attempt at this — and the "Register here" /
+"Already registered? Log in" cross-links were plain anchors that
+silently dropped any `next` param when switching between the two pages.
+Fixed all of it: both forms now read and forward `next`, both
+cross-links preserve it, and both `loginPlayer`/`registerPlayer`
+redirect there via a shared `safeNextPath` helper instead of always
+hardcoding `/dashboard`.
+
+**`safeNextPath` never trusts the value outright** — honoring an
+arbitrary `next` from a query string is a classic open-redirect
+vulnerability, so only a same-app relative path is accepted. Verified
+against 11 cases directly: absolute URLs, protocol-relative `//evil.com`
+tricks, bare domains without a protocol, a `javascript:` scheme, and
+redirecting back to `/login` or `/register` themselves (which would make
+no sense as a post-login destination) are all rejected in favor of the
+`/dashboard` default.
+
+## A real Next.js security update, found by accident
+
+Installing the PDF libraries for the feature above ran `npm audit` for
+the first time in this entire project, surfacing something serious and
+completely unrelated to PDFs: this app was on **Next.js 15.5.20**, the
+last vulnerable release before Vercel patched a batch of CVEs on July
+21, 2026 — including CVE-2026-64641, a high-severity Server Action
+denial-of-service bug, and an SSRF issue, both directly applicable to
+how this app is built (App Router, Server Actions throughout). Updated
+to **15.5.25**, a patch-level bump with no breaking changes, not a risky
+major-version jump.
+
+`npm audit` still shows 9 remaining vulnerabilities after this fix, all
+in dev-only tooling — the local Supabase CLI and the test runner — never
+deployed to production. Resolving those fully would force breaking
+version changes to unrelated tools as a side effect of a PDF feature, so
+they're left as a documented, low-priority follow-up rather than forced
+through here. Worth running `npm audit` again periodically going
+forward, now that it's been done once — this app went its entire build
+without anyone checking until this.
+
 ## Members page: sort by handicap
 
 `/players` has a clickable "Handicap" header, same 3-state cycle and

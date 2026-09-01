@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth";
 import { getEventDetail, getEventLeaderboard } from "@/app/actions/events";
 import { listAllPlayers } from "@/app/actions/players";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
 import { BrandEyebrow } from "@/components/brand-eyebrow";
 import { EventRegistrationButton } from "@/components/event-registration-button";
 import {
@@ -10,6 +11,7 @@ import {
   AdminRemoveRegistrationButton,
 } from "@/components/admin-event-registration-manager";
 import { AdminEventStatusActions } from "@/components/admin-event-status-actions";
+import { EVENT_FORMAT_LABEL } from "@/lib/event-format";
 
 function formatEventDate(dateStr: string): string {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, {
@@ -29,11 +31,6 @@ function formatTeeTime(timeStr: string): string {
   const d = new Date(2000, 0, 1, Number(hours), Number(minutes));
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
-
-const FORMAT_LABEL: Record<"stroke_play" | "stableford", string> = {
-  stroke_play: "Stroke play",
-  stableford: "Stableford",
-};
 
 export default async function EventDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -67,7 +64,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
               </span>
             )}
             <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
-              {FORMAT_LABEL[event.format]}
+              {EVENT_FORMAT_LABEL[event.format]}
             </span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -79,7 +76,23 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
         {isAdmin && (
           <Card className="mb-6">
             <CardContent>
-              <AdminEventStatusActions eventId={event.id} status={event.status} />
+              <div className="flex flex-wrap items-center gap-2">
+                <AdminEventStatusActions eventId={event.id} status={event.status} />
+                {event.status === "published" && (
+                  // Plain <a>, not next/link — this hits a Route Handler
+                  // that returns a file with Content-Disposition:
+                  // attachment, not a page. A real anchor tag gets a
+                  // predictable browser-native download; Link's
+                  // client-side routing is built for page transitions,
+                  // not file downloads, and isn't the right tool here.
+                  <a
+                    href={`/events/${event.id}/pdf`}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    Download sign-up sheet
+                  </a>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
@@ -117,7 +130,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
           <CardHeader>
             <CardTitle className="text-lg">Leaderboard</CardTitle>
             <CardDescription>
-              {FORMAT_LABEL[event.format]} ·{" "}
+              {EVENT_FORMAT_LABEL[event.format]} ·{" "}
               {event.format === "stroke_play" ? "lowest net score wins" : "highest points wins"} ·
               approved rounds only
             </CardDescription>
