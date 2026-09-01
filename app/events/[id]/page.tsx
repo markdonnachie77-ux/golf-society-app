@@ -75,7 +75,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
 
         {isAdmin && (
           <Card className="mb-6">
-            <CardContent>
+            <CardContent className="flex items-center">
               <div className="flex flex-wrap items-center gap-2">
                 <AdminEventStatusActions eventId={event.id} status={event.status} />
                 {event.status === "published" && (
