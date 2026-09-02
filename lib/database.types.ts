@@ -366,6 +366,10 @@ export interface Database {
           self_registration_enabled: boolean;
           status: EventStatus;
           format: EventFormat;
+          handicap_cut_for_winner: number;
+          leaderboard_confirmed_at: string | null;
+          leaderboard_confirmed_by: string | null;
+          winner_player_id: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -381,6 +385,10 @@ export interface Database {
           self_registration_enabled?: boolean;
           status?: EventStatus;
           format?: EventFormat;
+          handicap_cut_for_winner?: number;
+          leaderboard_confirmed_at?: string | null;
+          leaderboard_confirmed_by?: string | null;
+          winner_player_id?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -397,6 +405,20 @@ export interface Database {
           {
             foreignKeyName: "events_created_by_fkey";
             columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "players";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "events_leaderboard_confirmed_by_fkey";
+            columns: ["leaderboard_confirmed_by"];
+            isOneToOne: false;
+            referencedRelation: "players";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "events_winner_player_id_fkey";
+            columns: ["winner_player_id"];
             isOneToOne: false;
             referencedRelation: "players";
             referencedColumns: ["id"];

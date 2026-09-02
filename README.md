@@ -846,6 +846,60 @@ database or in a URL query param, since this is genuinely the first
 case where neither fit: too trivial for a database round-trip, and not
 meaningful to put in a shareable URL.
 
+## Handicap cut for winner and "confirm leaderboard" (`0019_event_handicap_cut.sql`)
+
+Each event has a "handicap cut for winner" setting (an integer, can be
+zero) and an admin-only "confirm leaderboard" action. Confirming locks
+in whoever's currently in first place and, if the cut is nonzero,
+immediately takes that many strokes off their handicap.
+
+**Two decisions were confirmed directly with the user rather than
+assumed, since both are easy to get wrong in a way that quietly
+misapplies a real handicap change:**
+
+- **A tie for first gets no automatic cut at all** — not split, not
+  applied to both, not decided by whoever the query happens to list
+  first. Ties are for the admin to resolve manually via the existing
+  handicap override on a player's profile. `confirmEventLeaderboard`
+  only compares the top two leaderboard entries for this — a tie
+  further down the list (second vs. third place, say) never affects
+  who's confirmed as the winner.
+- **Confirming is permanent — no undo, no re-confirm.** If a late
+  scorecard comes in afterward that would have changed the result,
+  that's a manual correction via `adjustPlayerHandicap`, not something
+  this feature reopens. The database enforces this too, not just the
+  UI: `confirm_event_leaderboard` locks the event row and raises if
+  `leaderboard_confirmed_at` is already set, so a double-click or two
+  admins racing can't apply the cut twice.
+
+**Confirmation and the handicap adjustment happen in one atomic
+transaction, not two separate calls.** The obvious approach — call the
+existing `manual_handicap_adjustment` RPC as a second step after
+marking the event confirmed — was deliberately avoided: if that second
+call failed for any reason, the event would be left permanently marked
+confirmed with the cut never actually applied, and confirming can't be
+retried to fix it. `confirm_event_leaderboard` inlines the same
+compute-delta / update-handicap / insert-history logic
+`manual_handicap_adjustment` already uses, inside the same transaction
+that sets the confirmation fields.
+
+**The winner is determined from the exact same `getEventLeaderboard`
+the page itself displays**, not re-derived independently — so what gets
+confirmed can never disagree with what an admin actually saw on screen
+when they clicked confirm. Also gets an explicit defense-in-depth
+society check on the determined winner immediately before the RPC call
+(matching the pattern used for `onBehalfOfPlayerId` in
+`createScorecard`) — the id is already inherently society-scoped by
+construction (it comes from an approved scorecard, which can only
+belong to a player in the same society), but a real handicap mutation
+seemed worth confirming that explicitly rather than trusting it holds
+by construction alone.
+
+Verified the winner/tie logic directly against five cases, including
+the one most likely to be gotten wrong by accident: a tie for *second*
+place must not prevent a clear winner from being determined at all —
+only the top two entries matter for tie detection.
+
 ## Stuck "Removing…" / "Reverting…" buttons after a successful action
 
 Real bug, found via the QR-code sign-up flow: register for an event,

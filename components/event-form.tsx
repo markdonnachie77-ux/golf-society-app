@@ -14,6 +14,7 @@ export interface EventFormInitialData {
   capacity: number;
   selfRegistrationEnabled: boolean;
   format: "stroke_play" | "stableford";
+  handicapCutForWinner: number;
 }
 
 interface EventFormProps {
@@ -41,6 +42,9 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
   const [format, setFormat] = React.useState<"stroke_play" | "stableford">(
     initial?.format ?? "stableford"
   );
+  const [handicapCutForWinner, setHandicapCutForWinner] = React.useState(
+    String(initial?.handicapCutForWinner ?? "0")
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
@@ -59,6 +63,7 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("capacity", capacity);
     formData.set("selfRegistrationEnabled", String(selfRegistrationEnabled));
     formData.set("format", format);
+    formData.set("handicapCutForWinner", handicapCutForWinner);
 
     const result = await onSubmit(formData);
     if (!result.ok) {
@@ -175,6 +180,30 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           Stableford points regardless of this setting.
         </p>
         {fieldErrors.format && <p className="text-sm text-destructive">{fieldErrors.format}</p>}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="handicapCutForWinner">Handicap cut for winner</Label>
+        {/* Same text+inputMode=numeric pattern as capacity above — this
+            one can legitimately be 0 (no cut), so no min-1 assumption
+            here the way capacity has. */}
+        <Input
+          id="handicapCutForWinner"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={handicapCutForWinner}
+          onChange={(e) => setHandicapCutForWinner(e.target.value.replace(/[^0-9]/g, ""))}
+          disabled={pending}
+          required
+        />
+        <p className="text-xs text-muted-foreground">
+          Taken off the winner's handicap once an admin confirms the leaderboard after the
+          event. Use 0 for no cut.
+        </p>
+        {fieldErrors.handicapCutForWinner && (
+          <p className="text-sm text-destructive">{fieldErrors.handicapCutForWinner}</p>
+        )}
       </div>
 
       <label className="flex items-start gap-2.5">

@@ -45,6 +45,7 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
                 capacity: event.capacity,
                 selfRegistrationEnabled: event.selfRegistrationEnabled,
                 format: event.format,
+                handicapCutForWinner: event.handicapCutForWinner,
               }}
               courses={courses}
             />

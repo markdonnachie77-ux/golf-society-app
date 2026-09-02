@@ -11,6 +11,7 @@ import {
   AdminRemoveRegistrationButton,
 } from "@/components/admin-event-registration-manager";
 import { AdminEventStatusActions } from "@/components/admin-event-status-actions";
+import { ConfirmLeaderboardButton } from "@/components/confirm-leaderboard-button";
 import { EVENT_FORMAT_LABEL } from "@/lib/event-format";
 
 function formatEventDate(dateStr: string): string {
@@ -155,6 +156,31 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
                   </li>
                 ))}
               </ol>
+            )}
+
+            {event.leaderboardConfirmedAt ? (
+              <p className="mt-4 rounded-lg bg-secondary px-3 py-2 text-sm">
+                {event.winnerPlayerName ? (
+                  <>
+                    🏆 Winner: <span className="font-medium">{event.winnerPlayerName}</span>
+                    {event.handicapCutForWinner > 0 && (
+                      <> · handicap cut by {event.handicapCutForWinner}</>
+                    )}
+                  </>
+                ) : (
+                  <>Leaderboard confirmed — no single winner (empty leaderboard or a tie for first).</>
+                )}
+              </p>
+            ) : (
+              isAdmin &&
+              event.status === "published" && (
+                <div className="mt-4">
+                  <ConfirmLeaderboardButton
+                    eventId={event.id}
+                    handicapCutForWinner={event.handicapCutForWinner}
+                  />
+                </div>
+              )
             )}
           </CardContent>
         </Card>

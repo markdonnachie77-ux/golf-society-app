@@ -35,6 +35,11 @@ const eventDetailsSchema = z.object({
   format: z.enum(["stroke_play", "stableford"], {
     errorMap: () => ({ message: "Select a scoring format" }),
   }),
+  handicapCutForWinner: z
+    .number({ invalid_type_error: "Handicap cut must be a number" })
+    .int("Handicap cut must be a whole number")
+    .min(0, "Handicap cut can't be negative")
+    .max(54, "That handicap cut looks too high"),
 });
 
 function parseEventFormData(formData: FormData) {
@@ -46,6 +51,7 @@ function parseEventFormData(formData: FormData) {
     capacity: Number(formData.get("capacity")),
     selfRegistrationEnabled: formData.get("selfRegistrationEnabled") === "true",
     format: String(formData.get("format") ?? ""),
+    handicapCutForWinner: Number(formData.get("handicapCutForWinner") || 0),
   });
 }
 
@@ -75,6 +81,7 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       capacity: data.capacity,
       self_registration_enabled: data.selfRegistrationEnabled,
       format: data.format,
+      handicap_cut_for_winner: data.handicapCutForWinner,
       status: "draft",
       created_by: session.playerId,
       society_id: societyId,
@@ -124,6 +131,7 @@ export async function updateEvent(eventId: string, formData: FormData): Promise<
       capacity: data.capacity,
       self_registration_enabled: data.selfRegistrationEnabled,
       format: data.format,
+      handicap_cut_for_winner: data.handicapCutForWinner,
       updated_at: new Date().toISOString(),
     })
     .eq("id", eventId)
@@ -294,6 +302,10 @@ export interface EventDetail {
   selfRegistrationEnabled: boolean;
   status: EventStatus;
   format: EventFormat;
+  handicapCutForWinner: number;
+  leaderboardConfirmedAt: string | null;
+  winnerPlayerId: string | null;
+  winnerPlayerName: string | null;
   courseId: string;
   courseName: string;
   registrations: { playerId: string; playerName: string; registeredBy: string }[];
@@ -312,7 +324,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const { data: event, error } = await supabase
     .from("events")
     .select(
-      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, course_id, courses(name)"
+      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, leaderboard_confirmed_at, winner_player_id, course_id, courses(name), winner:players!events_winner_player_id_fkey(first_name, last_name)"
     )
     .eq("id", eventId)
     .eq("society_id", societyId)
@@ -335,6 +347,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const rawRegRows = (regRows ?? []) as unknown as RawRegRow[];
 
   const course = event.courses as unknown as { name: string } | null;
+  const winner = event.winner as unknown as { first_name: string; last_name: string } | null;
 
   return {
     id: event.id,
@@ -345,6 +358,10 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
     selfRegistrationEnabled: event.self_registration_enabled,
     status: event.status,
     format: event.format,
+    handicapCutForWinner: event.handicap_cut_for_winner,
+    leaderboardConfirmedAt: event.leaderboard_confirmed_at,
+    winnerPlayerId: event.winner_player_id,
+    winnerPlayerName: winner ? `${winner.first_name} ${winner.last_name}` : null,
     courseId: event.course_id,
     courseName: course?.name ?? "Unknown course",
     registrations: rawRegRows.map((r) => ({
@@ -600,6 +617,88 @@ export async function getEventLeaderboard(eventId: string): Promise<LeaderboardE
   entries.sort((a, b) => (event.format === "stroke_play" ? a.score - b.score : b.score - a.score));
 
   return entries;
+}
+
+/**
+ * Locks in the winner and, if there is a clear one (not a tie, per a
+ * decision made directly with the user rather than assumed) and the
+ * event's handicap_cut_for_winner is nonzero, applies that cut to their
+ * handicap — all in one atomic database transaction (see
+ * confirm_event_leaderboard in 0019_event_handicap_cut.sql). This action
+ * only determines WHO the winner is, using the exact same
+ * getEventLeaderboard the page itself displays, so what gets confirmed
+ * always matches what an admin actually saw on screen — it never
+ * re-derives rankings from raw data independently, which could
+ * disagree with the displayed leaderboard if the two implementations
+ * ever drifted apart.
+ *
+ * Confirming is permanent — confirmed directly with the user, not
+ * assumed: there is no unconfirm or re-confirm. A late scorecard that
+ * would have changed the result after confirming is a manual
+ * correction via adjustPlayerHandicap, not something this reopens.
+ */
+export async function confirmEventLeaderboard(eventId: string): Promise<ActionResult> {
+  const session = await requireAdmin();
+  const societyId = await getCurrentSocietyId();
+  const supabase = createServiceClient();
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("id, name, status, leaderboard_confirmed_at")
+    .eq("id", eventId)
+    .eq("society_id", societyId)
+    .maybeSingle();
+
+  if (!event) {
+    return { ok: false, error: "Event not found." };
+  }
+  if (event.status !== "published") {
+    return { ok: false, error: "Publish this event before confirming its leaderboard." };
+  }
+  if (event.leaderboard_confirmed_at) {
+    return { ok: false, error: "This event's leaderboard has already been confirmed." };
+  }
+
+  const leaderboard = await getEventLeaderboard(eventId);
+  // No single winner when the leaderboard is empty (nobody's submitted
+  // an approved round yet) or when the top two entries are tied — a tie
+  // for first gets no automatic cut at all (confirmed directly with the
+  // user), left for an admin to resolve manually via the handicap
+  // override on the player's profile.
+  const isTie = leaderboard.length >= 2 && leaderboard[0].score === leaderboard[1].score;
+  let winnerPlayerId = leaderboard.length > 0 && !isTie ? leaderboard[0].playerId : null;
+
+  // Defense-in-depth, matching the pattern used everywhere else a
+  // cross-entity id gets passed into a mutating RPC (e.g. createScorecard's
+  // onBehalfOfPlayerId check) — winnerPlayerId is already inherently
+  // society-scoped in practice (it comes from an approved scorecard,
+  // which can only belong to a player in this same society), but this
+  // confirms it explicitly rather than relying on that being true by
+  // construction, since this RPC mutates a real handicap.
+  if (winnerPlayerId) {
+    const { data: winnerPlayer } = await supabase
+      .from("players")
+      .select("id")
+      .eq("id", winnerPlayerId)
+      .eq("society_id", societyId)
+      .maybeSingle();
+    if (!winnerPlayer) {
+      winnerPlayerId = null;
+    }
+  }
+
+  const { error } = await (supabase.rpc as any)("confirm_event_leaderboard", {
+    p_event_id: eventId,
+    p_confirmed_by: session.playerId,
+    p_winner_player_id: winnerPlayerId,
+    p_event_name: event.name,
+  });
+
+  if (error) {
+    return { ok: false, error: error.message || "Could not confirm this leaderboard." };
+  }
+
+  return { ok: true };
 }
 
 // ---------- Linking a round to an event at submission time ----------
