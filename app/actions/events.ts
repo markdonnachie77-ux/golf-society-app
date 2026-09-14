@@ -40,6 +40,7 @@ const eventDetailsSchema = z.object({
     .int("Handicap cut must be a whole number")
     .min(0, "Handicap cut can't be negative")
     .max(54, "That handicap cut looks too high"),
+  usesCompetitionHandicapIndex: z.boolean(),
 });
 
 function parseEventFormData(formData: FormData) {
@@ -52,6 +53,7 @@ function parseEventFormData(formData: FormData) {
     selfRegistrationEnabled: formData.get("selfRegistrationEnabled") === "true",
     format: String(formData.get("format") ?? ""),
     handicapCutForWinner: Number(formData.get("handicapCutForWinner") || 0),
+    usesCompetitionHandicapIndex: formData.get("usesCompetitionHandicapIndex") === "true",
   });
 }
 
@@ -82,6 +84,7 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       self_registration_enabled: data.selfRegistrationEnabled,
       format: data.format,
       handicap_cut_for_winner: data.handicapCutForWinner,
+      uses_competition_handicap_index: data.usesCompetitionHandicapIndex,
       status: "draft",
       created_by: session.playerId,
       society_id: societyId,
@@ -132,6 +135,7 @@ export async function updateEvent(eventId: string, formData: FormData): Promise<
       self_registration_enabled: data.selfRegistrationEnabled,
       format: data.format,
       handicap_cut_for_winner: data.handicapCutForWinner,
+      uses_competition_handicap_index: data.usesCompetitionHandicapIndex,
       updated_at: new Date().toISOString(),
     })
     .eq("id", eventId)
@@ -303,6 +307,7 @@ export interface EventDetail {
   status: EventStatus;
   format: EventFormat;
   handicapCutForWinner: number;
+  usesCompetitionHandicapIndex: boolean;
   leaderboardConfirmedAt: string | null;
   winnerPlayerId: string | null;
   winnerPlayerName: string | null;
@@ -324,7 +329,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const { data: event, error } = await supabase
     .from("events")
     .select(
-      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, leaderboard_confirmed_at, winner_player_id, course_id, courses(name), winner:players!events_winner_player_id_fkey(first_name, last_name)"
+      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, leaderboard_confirmed_at, winner_player_id, course_id, courses(name), winner:players!events_winner_player_id_fkey(first_name, last_name)"
     )
     .eq("id", eventId)
     .eq("society_id", societyId)
@@ -359,6 +364,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
     status: event.status,
     format: event.format,
     handicapCutForWinner: event.handicap_cut_for_winner,
+    usesCompetitionHandicapIndex: event.uses_competition_handicap_index,
     leaderboardConfirmedAt: event.leaderboard_confirmed_at,
     winnerPlayerId: event.winner_player_id,
     winnerPlayerName: winner ? `${winner.first_name} ${winner.last_name}` : null,

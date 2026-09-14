@@ -375,6 +375,7 @@ export interface Database {
           status: EventStatus;
           format: EventFormat;
           handicap_cut_for_winner: number;
+          uses_competition_handicap_index: boolean;
           leaderboard_confirmed_at: string | null;
           leaderboard_confirmed_by: string | null;
           winner_player_id: string | null;
@@ -394,6 +395,7 @@ export interface Database {
           status?: EventStatus;
           format?: EventFormat;
           handicap_cut_for_winner?: number;
+          uses_competition_handicap_index?: boolean;
           leaderboard_confirmed_at?: string | null;
           leaderboard_confirmed_by?: string | null;
           winner_player_id?: string | null;

@@ -846,6 +846,30 @@ database or in a URL query param, since this is genuinely the first
 case where neither fit: too trivial for a database round-trip, and not
 meaningful to put in a shareable URL.
 
+## Competition Handicap Index toggle (`0021_event_competition_handicap_toggle.sql`)
+
+Second step toward competition handicap rules, on top of the Course
+Rating / Slope Rating capture in `0020`: a per-event checkbox — "Use
+Competition Handicap Index" — letting an admin indicate whether an
+event uses Competition Handicap Index calculations or just normal
+handicaps (this app's existing `current_handicap` system, completely
+unaffected either way).
+
+**Still the toggle/decision only, not the calculation itself** — same
+scope discipline as `0020`. Nothing in round-logging, scoring, or the
+leaderboard reads this flag yet; it's purely captured and displayed
+(a small badge next to the event's format badge, shown only when
+enabled, matching the same "don't clutter the common case" reasoning
+used for other optional event badges). Wiring the actual Course
+Handicap formula (`Handicap Index × Slope Rating / 113 + (Course
+Rating − Par)`) into how a round gets scored for such an event is a
+separate, later step.
+
+**Defaults to `false`, not `true`** — every existing event keeps
+behaving exactly as it does today. This is an opt-in addition an admin
+chooses per event, not a retroactive change to how anything already
+set up gets scored.
+
 ## Course Rating and Slope Rating per tee (`0020_course_and_slope_rating.sql`)
 
 First step toward competition handicap rules (World Handicap System

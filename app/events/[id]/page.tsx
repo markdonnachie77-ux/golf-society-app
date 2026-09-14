@@ -67,6 +67,11 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
             <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
               {EVENT_FORMAT_LABEL[event.format]}
             </span>
+            {event.usesCompetitionHandicapIndex && (
+              <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
+                Competition Handicap Index
+              </span>
+            )}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {event.courseName} · {formatEventDate(event.eventDate)} · First tee{" "}

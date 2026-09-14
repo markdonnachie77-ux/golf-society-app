@@ -15,6 +15,7 @@ export interface EventFormInitialData {
   selfRegistrationEnabled: boolean;
   format: "stroke_play" | "stableford";
   handicapCutForWinner: number;
+  usesCompetitionHandicapIndex: boolean;
 }
 
 interface EventFormProps {
@@ -45,6 +46,9 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
   const [handicapCutForWinner, setHandicapCutForWinner] = React.useState(
     String(initial?.handicapCutForWinner ?? "0")
   );
+  const [usesCompetitionHandicapIndex, setUsesCompetitionHandicapIndex] = React.useState(
+    initial?.usesCompetitionHandicapIndex ?? false
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
@@ -64,6 +68,7 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("selfRegistrationEnabled", String(selfRegistrationEnabled));
     formData.set("format", format);
     formData.set("handicapCutForWinner", handicapCutForWinner);
+    formData.set("usesCompetitionHandicapIndex", String(usesCompetitionHandicapIndex));
 
     const result = await onSubmit(formData);
     if (!result.ok) {
@@ -205,6 +210,24 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           <p className="text-sm text-destructive">{fieldErrors.handicapCutForWinner}</p>
         )}
       </div>
+
+      <label className="flex items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={usesCompetitionHandicapIndex}
+          onChange={(e) => setUsesCompetitionHandicapIndex(e.target.checked)}
+          disabled={pending}
+          className="mt-1 h-4 w-4 shrink-0 rounded border-input"
+        />
+        <span className="text-sm">
+          <span className="font-medium">Use Competition Handicap Index</span>
+          <br />
+          <span className="text-muted-foreground">
+            Based on Course Rating and Slope Rating rather than normal handicaps. Leave off to
+            use each player's normal handicap for this event instead.
+          </span>
+        </span>
+      </label>
 
       <label className="flex items-start gap-2.5">
         <input
