@@ -15,6 +15,10 @@ export interface CourseFormInitialData {
   holeCount: 9 | 18;
   handicapCutPerPoint: number;
   handicapIncreasePerPoint: number;
+  whiteCourseRating: number | null;
+  whiteSlopeRating: number | null;
+  yellowCourseRating: number | null;
+  yellowSlopeRating: number | null;
   holes: HoleRowInput[];
 }
 
@@ -31,6 +35,18 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
   const [cutRate, setCutRate] = React.useState(String(initial?.handicapCutPerPoint ?? "0.2"));
   const [increaseRate, setIncreaseRate] = React.useState(
     String(initial?.handicapIncreasePerPoint ?? "0.1")
+  );
+  const [whiteCourseRating, setWhiteCourseRating] = React.useState(
+    initial?.whiteCourseRating != null ? String(initial.whiteCourseRating) : ""
+  );
+  const [whiteSlopeRating, setWhiteSlopeRating] = React.useState(
+    initial?.whiteSlopeRating != null ? String(initial.whiteSlopeRating) : ""
+  );
+  const [yellowCourseRating, setYellowCourseRating] = React.useState(
+    initial?.yellowCourseRating != null ? String(initial.yellowCourseRating) : ""
+  );
+  const [yellowSlopeRating, setYellowSlopeRating] = React.useState(
+    initial?.yellowSlopeRating != null ? String(initial.yellowSlopeRating) : ""
   );
   const [holes, setHoles] = React.useState<HoleRowInput[]>(
     initial?.holes ?? buildDefaultHoles(18)
@@ -73,6 +89,10 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
     formData.set("holeCount", String(holeCount));
     formData.set("handicapCutPerPoint", cutRate);
     formData.set("handicapIncreasePerPoint", increaseRate);
+    formData.set("whiteCourseRating", whiteCourseRating);
+    formData.set("whiteSlopeRating", whiteSlopeRating);
+    formData.set("yellowCourseRating", yellowCourseRating);
+    formData.set("yellowSlopeRating", yellowSlopeRating);
     formData.set("holesJson", JSON.stringify(holes));
 
     const result = await onSubmit(formData);
@@ -133,6 +153,77 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
             required
           />
           <p className="text-xs text-muted-foreground">Set to 0 for a buffered zone.</p>
+        </div>
+      </div>
+
+      <div>
+        <Label>Course Rating &amp; Slope Rating (optional)</Label>
+        <p className="mt-1 text-xs text-muted-foreground">
+          From the course&apos;s official rating card, per tee. First step toward competition
+          handicap calculations — leave blank if not yet known.
+        </p>
+        <div className="mt-3 grid gap-5 sm:grid-cols-2">
+          <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+            <p className="text-sm font-medium">White tees</p>
+            <div className="space-y-1.5">
+              <Label htmlFor="whiteCourseRating">Course Rating</Label>
+              {/* type="text" + inputMode="decimal" — same pattern as
+                  cutRate/increaseRate above. Course Rating is a decimal
+                  (e.g. 71.2), unlike Slope Rating which is a whole
+                  number. */}
+              <Input
+                id="whiteCourseRating"
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g. 71.2"
+                value={whiteCourseRating}
+                onChange={(e) => setWhiteCourseRating(e.target.value)}
+                disabled={pending}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="whiteSlopeRating">Slope Rating</Label>
+              <Input
+                id="whiteSlopeRating"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="e.g. 128"
+                value={whiteSlopeRating}
+                onChange={(e) => setWhiteSlopeRating(e.target.value.replace(/[^0-9]/g, ""))}
+                disabled={pending}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+            <p className="text-sm font-medium">Yellow tees</p>
+            <div className="space-y-1.5">
+              <Label htmlFor="yellowCourseRating">Course Rating</Label>
+              <Input
+                id="yellowCourseRating"
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g. 69.5"
+                value={yellowCourseRating}
+                onChange={(e) => setYellowCourseRating(e.target.value)}
+                disabled={pending}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="yellowSlopeRating">Slope Rating</Label>
+              <Input
+                id="yellowSlopeRating"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="e.g. 122"
+                value={yellowSlopeRating}
+                onChange={(e) => setYellowSlopeRating(e.target.value.replace(/[^0-9]/g, ""))}
+                disabled={pending}
+              />
+            </div>
+          </div>
         </div>
       </div>
 

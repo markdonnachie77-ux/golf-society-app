@@ -88,6 +88,10 @@ export interface Database {
           hole_count: 9 | 18;
           handicap_cut_per_point: number;
           handicap_increase_per_point: number;
+          white_course_rating: number | null;
+          white_slope_rating: number | null;
+          yellow_course_rating: number | null;
+          yellow_slope_rating: number | null;
           created_at: string;
           society_id: string;
         };
@@ -98,6 +102,10 @@ export interface Database {
           hole_count?: 9 | 18;
           handicap_cut_per_point?: number;
           handicap_increase_per_point?: number;
+          white_course_rating?: number | null;
+          white_slope_rating?: number | null;
+          yellow_course_rating?: number | null;
+          yellow_slope_rating?: number | null;
           created_at?: string;
           society_id?: string;
         };

@@ -20,6 +20,33 @@ const courseDetailsSchema = z.object({
     .number({ invalid_type_error: "Increase rate must be a number" })
     .min(0, "Increase rate can't be negative")
     .max(9.99, "Increase rate looks too high"),
+  // All four nullable — an admin may not have these figures to hand yet
+  // (they come from the course's official rating card, not something
+  // typed from memory). null coming through as NaN from an empty form
+  // field is normalized to null before this schema ever sees it — see
+  // parseRatingField below.
+  whiteCourseRating: z
+    .number({ invalid_type_error: "Course rating must be a number" })
+    .positive("Course rating must be positive")
+    .max(99.9, "That course rating looks too high")
+    .nullable(),
+  whiteSlopeRating: z
+    .number({ invalid_type_error: "Slope rating must be a number" })
+    .int("Slope rating must be a whole number")
+    .min(55, "Slope rating must be at least 55")
+    .max(155, "Slope rating can't exceed 155")
+    .nullable(),
+  yellowCourseRating: z
+    .number({ invalid_type_error: "Course rating must be a number" })
+    .positive("Course rating must be positive")
+    .max(99.9, "That course rating looks too high")
+    .nullable(),
+  yellowSlopeRating: z
+    .number({ invalid_type_error: "Slope rating must be a number" })
+    .int("Slope rating must be a whole number")
+    .min(55, "Slope rating must be at least 55")
+    .max(155, "Slope rating can't exceed 155")
+    .nullable(),
 });
 
 const holeRowSchema = z.object({
@@ -30,6 +57,21 @@ const holeRowSchema = z.object({
   yellowYards: z.number().int().positive().nullable(),
 });
 
+/**
+ * An empty form field must become null (not set), not 0 — Number("")
+ * evaluates to 0 in JavaScript, which would incorrectly fail the
+ * schema's .positive() check rather than being treated as "not yet
+ * captured." A genuinely malformed value (not empty, not a valid
+ * number) is left as NaN rather than silently coerced to null, so the
+ * zod schema's own number check catches it with a clear error instead
+ * of quietly discarding bad input.
+ */
+function parseOptionalNumberField(formData: FormData, key: string): number | null {
+  const raw = String(formData.get(key) ?? "").trim();
+  if (raw === "") return null;
+  return Number(raw);
+}
+
 function parseCourseFormData(formData: FormData) {
   const holeCountRaw = Number(formData.get("holeCount"));
   const detailsParsed = courseDetailsSchema.safeParse({
@@ -38,6 +80,10 @@ function parseCourseFormData(formData: FormData) {
     holeCount: holeCountRaw,
     handicapCutPerPoint: Number(formData.get("handicapCutPerPoint")),
     handicapIncreasePerPoint: Number(formData.get("handicapIncreasePerPoint")),
+    whiteCourseRating: parseOptionalNumberField(formData, "whiteCourseRating"),
+    whiteSlopeRating: parseOptionalNumberField(formData, "whiteSlopeRating"),
+    yellowCourseRating: parseOptionalNumberField(formData, "yellowCourseRating"),
+    yellowSlopeRating: parseOptionalNumberField(formData, "yellowSlopeRating"),
   });
 
   let holes: HoleRowInput[] = [];
@@ -84,6 +130,10 @@ export async function createCourse(formData: FormData): Promise<ActionResult> {
       hole_count: details.holeCount,
       handicap_cut_per_point: details.handicapCutPerPoint,
       handicap_increase_per_point: details.handicapIncreasePerPoint,
+      white_course_rating: details.whiteCourseRating,
+      white_slope_rating: details.whiteSlopeRating,
+      yellow_course_rating: details.yellowCourseRating,
+      yellow_slope_rating: details.yellowSlopeRating,
       society_id: societyId,
     })
     .select("id")
@@ -154,6 +204,10 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
       hole_count: details.holeCount,
       handicap_cut_per_point: details.handicapCutPerPoint,
       handicap_increase_per_point: details.handicapIncreasePerPoint,
+      white_course_rating: details.whiteCourseRating,
+      white_slope_rating: details.whiteSlopeRating,
+      yellow_course_rating: details.yellowCourseRating,
+      yellow_slope_rating: details.yellowSlopeRating,
     })
     .eq("id", courseId)
     .eq("society_id", societyId)

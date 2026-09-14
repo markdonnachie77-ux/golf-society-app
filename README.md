@@ -846,6 +846,47 @@ database or in a URL query param, since this is genuinely the first
 case where neither fit: too trivial for a database round-trip, and not
 meaningful to put in a shareable URL.
 
+## Course Rating and Slope Rating per tee (`0020_course_and_slope_rating.sql`)
+
+First step toward competition handicap rules (World Handicap System
+style Course Handicap calculations) — capturing Course Rating and
+Slope Rating for the white and yellow tees on each course. The actual
+Course Handicap calculation itself (`Handicap Index × Slope Rating /
+113 + (Course Rating − Par)`) is a separate, later step; this migration
+is purely the data capture the user explicitly asked for first.
+
+**Per-tee-color column pairs directly on `courses`, not a new "tees"
+table** — this follows the exact pattern `0003_create_holes.sql`
+already established for `white_yards`/`yellow_yards`, rather than
+introducing a new normalization. Course Rating and Slope Rating are
+properties of a whole tee set, not per-hole, so they belong on
+`courses` (course-level) rather than `holes` (per-hole) — but the
+"one column pair per tee color" shape matches what this codebase
+already does elsewhere for exactly this kind of per-tee data.
+
+**All four columns are nullable, with no default.** An admin setting
+up a course may not have Course Rating or Slope Rating to hand yet —
+these come from the course's official rating card, not something
+typed from memory — so null is a valid "not yet captured" state, not
+an error. The form's optional-field parsing specifically distinguishes
+an empty field (→ `null`) from a genuinely malformed value (→ `NaN`,
+which the zod schema then rejects with a clear error) — `Number("")`
+evaluates to `0` in JavaScript, which would otherwise have incorrectly
+failed the schema's `.positive()` check instead of being treated as
+"not set." Verified this distinction directly against zod's actual
+behavior for null, a valid number, `NaN`, zero, and negative inputs,
+since getting this wrong either way — silently accepting bad input or
+incorrectly rejecting an intentionally-blank field — would be an
+annoying, hard-to-diagnose form bug.
+
+Slope Rating is constrained to 55–155, matching the World Handicap
+System's own defined range (113 = average difficulty) — a real,
+standardized bound worth enforcing directly rather than leaving
+unconstrained. Course Rating only gets a loose upper bound (under
+100), since it varies legitimately with course length and hole count
+(a 9-hole course's rating is roughly half an 18-hole one) in a way
+that doesn't have an equally standardized range to check against.
+
 ## Handicap cut for winner and "confirm leaderboard" (`0019_event_handicap_cut.sql`)
 
 Each event has a "handicap cut for winner" setting (an integer, can be
