@@ -193,39 +193,59 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Who's registered</CardTitle>
-            <CardDescription>
-              {event.usesCompetitionHandicapIndex
-                ? `Competition Handicap (${event.teeColor === "white" ? "White" : "Yellow"} tees)`
-                : "Handicap"}
-            </CardDescription>
           </CardHeader>
           <CardContent>
             {event.registrations.length === 0 ? (
               <p className="text-sm text-muted-foreground">No one has registered yet.</p>
             ) : (
-              <ul className="space-y-2">
-                {event.registrations.map((r) => (
-                  <li key={r.playerId} className="flex items-center justify-between">
-                    <span className="text-sm">{r.playerName}</span>
-                    <span className="flex items-center gap-3">
-                      <span className="font-numeral text-sm text-muted-foreground">
-                        {event.usesCompetitionHandicapIndex ? (
-                          r.competitionHandicap !== null ? (
-                            r.competitionHandicap
+              <>
+                {/* Mirrors each row's own flex structure below exactly
+                    (empty left side, same right-side flex+gap group) so
+                    the label lines up with the numbers column rather
+                    than sitting at the card's left edge like a generic
+                    subtitle. The invisible "Remove" placeholder reserves
+                    the same width the real link takes in the admin
+                    view, so the label's position doesn't shift between
+                    admin and non-admin. */}
+                <div className="mb-1 flex items-center justify-between">
+                  <span />
+                  <span className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">
+                      {event.usesCompetitionHandicapIndex
+                        ? `Competition Handicap (${event.teeColor === "white" ? "White" : "Yellow"} tees)`
+                        : "Handicap"}
+                    </span>
+                    {isAdmin && (
+                      <span className="invisible text-xs" aria-hidden="true">
+                        Remove
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <ul className="space-y-2">
+                  {event.registrations.map((r) => (
+                    <li key={r.playerId} className="flex items-center justify-between">
+                      <span className="text-sm">{r.playerName}</span>
+                      <span className="flex items-center gap-3">
+                        <span className="font-numeral text-sm text-muted-foreground">
+                          {event.usesCompetitionHandicapIndex ? (
+                            r.competitionHandicap !== null ? (
+                              r.competitionHandicap
+                            ) : (
+                              <span className="text-xs italic">rating not set</span>
+                            )
                           ) : (
-                            <span className="text-xs italic">rating not set</span>
-                          )
-                        ) : (
-                          r.handicap
+                            r.handicap
+                          )}
+                        </span>
+                        {isAdmin && (
+                          <AdminRemoveRegistrationButton eventId={event.id} playerId={r.playerId} />
                         )}
                       </span>
-                      {isAdmin && (
-                        <AdminRemoveRegistrationButton eventId={event.id} playerId={r.playerId} />
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </CardContent>
         </Card>
