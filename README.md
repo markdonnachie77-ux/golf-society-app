@@ -1296,6 +1296,29 @@ its own TypeScript types, needing a separate `@types/qrcode` dev
 dependency — caught by the same `tsc --noEmit` check, before it could
 have failed a real Vercel build.
 
+## Handicap column on the sign-up PDF
+
+The "Already signed up" table now has a third column — the same
+`handicap`/`competitionHandicap` values already computed for the
+web page's "Who's registered" list, not a separate calculation.
+Labeled "Handicap" or "Comp. HC" depending on the event's Competition
+Handicap Index toggle, matching the web page's own label logic exactly
+(shortened for a printed column's width). A player whose Competition
+Handicap couldn't be computed — the course isn't rated for the event's
+tee yet — shows "n/a" here, the same case the web page shows as
+"rating not set".
+
+**Re-verified the single-page guarantee after adding the column**,
+rather than assuming a new column couldn't affect it. Widening a table
+narrows whatever's left for the Name column, which could plausibly
+cause long names to wrap and increase row height — the actual thing
+that determines page count. Re-ran the exact worst-case scenario from
+the original verification (every registered, zero blank rows — the
+case that puts maximum load on this specific table) with the new
+column and long/wrapping names both present: 22 total rows still fits
+on one page, 23 still tips to two, in every case tested. The existing
+`MAX_TOTAL_ROWS = 22` ceiling needed no change.
+
 ## Login/register now honor a `next` redirect param
 
 This exists specifically to make the sign-up PDF's QR code work while

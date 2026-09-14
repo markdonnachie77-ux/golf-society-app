@@ -37,7 +37,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   cellNameBase: { flex: 2, borderRightWidth: 1, borderRightColor: "#cccccc" },
-  cellNameOnlyBase: { flex: 1 },
+  cellNameOnlyBase: { flex: 1, borderRightWidth: 1, borderRightColor: "#cccccc" },
+  cellHandicapColBase: { width: 64, textAlign: "center" },
   cellContactBase: { flex: 2, borderRightWidth: 1, borderRightColor: "#cccccc" },
   cellHandicapBase: { flex: 1 },
   headerCellText: { fontSize: 10, fontWeight: "bold" },
@@ -115,7 +116,8 @@ export interface EventSignUpPdfProps {
   formatLabel: string;
   capacity: number;
   registeredCount: number;
-  registeredPlayerNames: string[];
+  registeredPlayers: { name: string; handicapDisplay: string }[];
+  handicapColumnLabel: string;
   qrDataUrl: string;
   signUpUrl: string;
 }
@@ -136,18 +138,19 @@ export function EventSignUpPdf({
   formatLabel,
   capacity,
   registeredCount,
-  registeredPlayerNames,
+  registeredPlayers,
+  handicapColumnLabel,
   qrDataUrl,
   signUpUrl,
 }: EventSignUpPdfProps) {
   const rawBlankRows = Math.max(0, capacity - registeredCount);
-  const totalRowsUncapped = registeredPlayerNames.length + rawBlankRows;
+  const totalRowsUncapped = registeredPlayers.length + rawBlankRows;
   // Both tables share the same scaling and the same overall row budget —
   // if the total would exceed MAX_TOTAL_ROWS, blank rows give way first
   // (already-registered names always all get shown; it's the hand-write
   // rows for people who haven't signed up yet that get trimmed).
-  const blankRows = Math.max(0, Math.min(rawBlankRows, MAX_TOTAL_ROWS - registeredPlayerNames.length));
-  const totalRows = registeredPlayerNames.length + blankRows;
+  const blankRows = Math.max(0, Math.min(rawBlankRows, MAX_TOTAL_ROWS - registeredPlayers.length));
+  const totalRows = registeredPlayers.length + blankRows;
 
   const sizing = computeRowSizing(totalRows);
   const bodyRow = { ...styles.bodyRowBase, minHeight: sizing.minHeight };
@@ -156,6 +159,11 @@ export function EventSignUpPdf({
   const cellNameOnly = { ...styles.cellNameOnlyBase, padding: sizing.padding, fontSize: sizing.fontSize };
   const cellContact = { ...styles.cellContactBase, padding: sizing.padding, fontSize: sizing.fontSize };
   const cellHandicap = { ...styles.cellHandicapBase, padding: sizing.padding, fontSize: sizing.fontSize };
+  const cellHandicapCol = {
+    ...styles.cellHandicapColBase,
+    padding: sizing.padding,
+    fontSize: sizing.fontSize,
+  };
 
   return (
     <Document>
@@ -193,18 +201,20 @@ export function EventSignUpPdf({
           </View>
         </View>
 
-        {registeredPlayerNames.length > 0 && (
+        {registeredPlayers.length > 0 && (
           <>
             <Text style={styles.sectionTitle}>Already signed up:</Text>
             <View style={[styles.table, { marginBottom: 20 }]}>
               <View style={styles.headerRow}>
                 <Text style={[cellNumber, styles.headerCellText]}>#</Text>
                 <Text style={[cellNameOnly, styles.headerCellText]}>Name</Text>
+                <Text style={[cellHandicapCol, styles.headerCellText]}>{handicapColumnLabel}</Text>
               </View>
-              {registeredPlayerNames.map((name, i) => (
+              {registeredPlayers.map((p, i) => (
                 <View style={bodyRow} key={i}>
                   <Text style={cellNumber}>{i + 1}</Text>
-                  <Text style={cellNameOnly}>{name}</Text>
+                  <Text style={cellNameOnly}>{p.name}</Text>
+                  <Text style={cellHandicapCol}>{p.handicapDisplay}</Text>
                 </View>
               ))}
             </View>

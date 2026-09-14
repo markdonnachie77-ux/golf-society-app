@@ -58,6 +58,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const qrDataUrl = await QRCode.toDataURL(signUpUrl, { margin: 1, width: 400 });
 
+  const handicapColumnLabel = event.usesCompetitionHandicapIndex ? "Comp. HC" : "Handicap";
+  const registeredPlayers = event.registrations.map((r) => ({
+    name: r.playerName,
+    // Mirrors the "Who's registered" web display exactly: Competition
+    // Handicap when the event's toggle is on and it was actually
+    // computable, the player's ordinary handicap otherwise — "n/a"
+    // covers the same "toggle on, but this course isn't rated for its
+    // tee yet" case the web page shows as "rating not set", just
+    // shortened for a printed column.
+    handicapDisplay: event.usesCompetitionHandicapIndex
+      ? r.competitionHandicap !== null
+        ? String(r.competitionHandicap)
+        : "n/a"
+      : String(r.handicap),
+  }));
+
   const pdfBuffer = await renderToBuffer(
     <EventSignUpPdf
       eventName={event.name}
@@ -67,7 +83,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       formatLabel={EVENT_FORMAT_LABEL[event.format]}
       capacity={event.capacity}
       registeredCount={event.registrations.length}
-      registeredPlayerNames={event.registrations.map((r) => r.playerName)}
+      registeredPlayers={registeredPlayers}
+      handicapColumnLabel={handicapColumnLabel}
       qrDataUrl={qrDataUrl}
       signUpUrl={signUpUrl}
     />
