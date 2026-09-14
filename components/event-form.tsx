@@ -4,6 +4,7 @@ import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { TeeColorToggle } from "@/components/tee-color-toggle";
 import type { ActionResult } from "@/app/actions/auth";
 
 export interface EventFormInitialData {
@@ -16,6 +17,7 @@ export interface EventFormInitialData {
   format: "stroke_play" | "stableford";
   handicapCutForWinner: number;
   usesCompetitionHandicapIndex: boolean;
+  teeColor: "white" | "yellow";
 }
 
 interface EventFormProps {
@@ -49,6 +51,7 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
   const [usesCompetitionHandicapIndex, setUsesCompetitionHandicapIndex] = React.useState(
     initial?.usesCompetitionHandicapIndex ?? false
   );
+  const [teeColor, setTeeColor] = React.useState<"white" | "yellow">(initial?.teeColor ?? "white");
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
@@ -69,6 +72,7 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("format", format);
     formData.set("handicapCutForWinner", handicapCutForWinner);
     formData.set("usesCompetitionHandicapIndex", String(usesCompetitionHandicapIndex));
+    formData.set("teeColor", teeColor);
 
     const result = await onSubmit(formData);
     if (!result.ok) {
@@ -228,6 +232,18 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           </span>
         </span>
       </label>
+
+      {usesCompetitionHandicapIndex && (
+        <div className="space-y-1.5">
+          <Label>Tee (for the Competition Handicap calculation)</Label>
+          <div>
+            <TeeColorToggle value={teeColor} onChange={setTeeColor} disabled={pending} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Uses that tee&apos;s Course Rating and Slope Rating for everyone registered.
+          </p>
+        </div>
+      )}
 
       <label className="flex items-start gap-2.5">
         <input

@@ -846,6 +846,68 @@ database or in a URL query param, since this is genuinely the first
 case where neither fit: too trivial for a database round-trip, and not
 meaningful to put in a shareable URL.
 
+## Course Handicap calculation and display (`0022_event_tee_color.sql`)
+
+Third step: the "Who's registered" list on an event page now actually
+shows each player's handicap — labeled "Handicap" if
+`usesCompetitionHandicapIndex` is off, or "Competition Handicap (White
+tees)" / "(Yellow tees)" if it's on, computed via the standard World
+Handicap System formula in the new `computeCourseHandicap`
+(`lib/golf-math.ts`): `Handicap Index × (Slope Rating / 113) + (Course
+Rating − Par)`, rounded to the nearest whole number.
+
+**Needed a setting this app didn't have anywhere: which tee an event
+uses.** The formula needs one specific tee's Course Rating and Slope
+Rating, but registration happens before anyone's played a round — the
+existing `scorecard.tee_color` doesn't exist yet at that point. Solved
+directly with the user rather than guessed: `events.tee_color`
+(`0022`), one tee per event, same column definition
+`scorecards.tee_color` already uses. Only shown on the form when the
+Competition Handicap Index toggle is checked — irrelevant otherwise.
+
+**`computeCourseHandicap` is a plain, pure function**, following this
+file's existing philosophy exactly (see the file's own top comment) —
+no Supabase, no I/O, fully unit-testable. Verified against the
+standard WHS reference example (Handicap Index 10.5, Slope 130, Course
+Rating 71.5, Par 72 → 12) plus five other cases (scratch golfer,
+average-slope neutral case, slope direction both ways, a plus-handicap
+player) — 6 new permanent tests in `golf-math.test.ts`, not just
+scratch verification; the whole suite (83 tests across 5 files) still
+passes.
+
+**`current_handicap` is what feeds the formula as "Handicap Index"** —
+this app has never had a separate Handicap Index concept distinct from
+the ordinary handicap it already tracks, so no new field was added to
+`players`; the existing one is the input.
+
+**Par isn't a stored column on `courses`** — same as `CourseForm`
+already computes it client-side for display, `getEventDetail` sums
+each hole's own `par` at read time rather than duplicating a stored
+total that could drift out of sync with the hole grid.
+
+**Missing ratings produce "rating not set," never a silently wrong
+number.** A course might have Course Rating and Slope Rating set for
+one tee but not the other, or neither yet — `competitionHandicap` is
+only ever computed when *both* values are present for the event's
+chosen tee; otherwise it's `null`, and the UI shows "rating not set"
+rather than treating a missing value as zero (which would produce a
+plausible-looking but wrong calculation). Verified this specifically,
+including the partial case — one of the two ratings present, the
+other still null — not just the fully-missing and fully-present
+extremes.
+
+**Verified the tee-selection wiring separately from the formula
+itself** — a white-tee event must use white ratings, a yellow-tee
+event must use yellow ratings, never crossed, since mixing a white
+slope with a yellow course rating would silently produce a
+meaningless number without either failing loudly or looking obviously
+wrong.
+
+**Still not wired into scoring** — this is display only. Nothing in
+round-logging, `playing_handicap`, or the leaderboard uses
+`competitionHandicap` yet; that's a further, separate step whenever
+it's next.
+
 ## Competition Handicap Index toggle (`0021_event_competition_handicap_toggle.sql`)
 
 Second step toward competition handicap rules, on top of the Course

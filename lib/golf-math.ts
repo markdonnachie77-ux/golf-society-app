@@ -12,6 +12,35 @@
 export type RoundType = "full_18" | "front_9" | "back_9";
 
 // ---------------------------------------------------------------------------
+// Competition Handicap Index (World Handicap System Course Handicap)
+// ---------------------------------------------------------------------------
+
+/**
+ * World Handicap System's Course Handicap formula: Handicap Index ×
+ * (Slope Rating / 113) + (Course Rating − Par), rounded to the nearest
+ * whole number. Round-half-up, matching roundHandicapForAllocation's
+ * own convention just below — WHS specifies round-half-up for Course
+ * Handicap too, so this isn't a separate assumption, just the same one
+ * applied a second place.
+ *
+ * `handicapIndex` here is this app's existing `current_handicap` —
+ * there's no separate "Handicap Index" concept elsewhere in this app,
+ * so the player's ordinary handicap is what feeds this formula as its
+ * input. slopeRating/courseRating/par all need to come from the same
+ * tee (see the event's teeColor setting, app/actions/events.ts) — mixing
+ * a white-tee slope with a yellow-tee course rating would silently
+ * produce a meaningless number.
+ */
+export function computeCourseHandicap(
+  handicapIndex: number,
+  slopeRating: number,
+  courseRating: number,
+  par: number
+): number {
+  return Math.round(handicapIndex * (slopeRating / 113) + (courseRating - par));
+}
+
+// ---------------------------------------------------------------------------
 // Stroke allocation
 // ---------------------------------------------------------------------------
 

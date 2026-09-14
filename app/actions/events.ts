@@ -6,7 +6,8 @@ import { requireSession, requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
 import type { ActionResult } from "@/app/actions/auth";
-import type { EventStatus, EventFormat } from "@/lib/database.types";
+import type { EventStatus, EventFormat, TeeColor } from "@/lib/database.types";
+import { computeCourseHandicap } from "@/lib/golf-math";
 
 // ---------- Shared helpers ----------
 
@@ -41,6 +42,9 @@ const eventDetailsSchema = z.object({
     .min(0, "Handicap cut can't be negative")
     .max(54, "That handicap cut looks too high"),
   usesCompetitionHandicapIndex: z.boolean(),
+  teeColor: z.enum(["white", "yellow"], {
+    errorMap: () => ({ message: "Select a tee color" }),
+  }),
 });
 
 function parseEventFormData(formData: FormData) {
@@ -54,6 +58,7 @@ function parseEventFormData(formData: FormData) {
     format: String(formData.get("format") ?? ""),
     handicapCutForWinner: Number(formData.get("handicapCutForWinner") || 0),
     usesCompetitionHandicapIndex: formData.get("usesCompetitionHandicapIndex") === "true",
+    teeColor: String(formData.get("teeColor") ?? "white"),
   });
 }
 
@@ -85,6 +90,7 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       format: data.format,
       handicap_cut_for_winner: data.handicapCutForWinner,
       uses_competition_handicap_index: data.usesCompetitionHandicapIndex,
+      tee_color: data.teeColor,
       status: "draft",
       created_by: session.playerId,
       society_id: societyId,
@@ -136,6 +142,7 @@ export async function updateEvent(eventId: string, formData: FormData): Promise<
       format: data.format,
       handicap_cut_for_winner: data.handicapCutForWinner,
       uses_competition_handicap_index: data.usesCompetitionHandicapIndex,
+      tee_color: data.teeColor,
       updated_at: new Date().toISOString(),
     })
     .eq("id", eventId)
@@ -308,12 +315,26 @@ export interface EventDetail {
   format: EventFormat;
   handicapCutForWinner: number;
   usesCompetitionHandicapIndex: boolean;
+  teeColor: TeeColor;
   leaderboardConfirmedAt: string | null;
   winnerPlayerId: string | null;
   winnerPlayerName: string | null;
   courseId: string;
   courseName: string;
-  registrations: { playerId: string; playerName: string; registeredBy: string }[];
+  registrations: {
+    playerId: string;
+    playerName: string;
+    registeredBy: string;
+    handicap: number;
+    // Only ever non-null when usesCompetitionHandicapIndex is true AND
+    // the course has both Course Rating and Slope Rating set for the
+    // event's chosen tee — null covers both "the toggle is off" and
+    // "the toggle is on but the course isn't rated for that tee yet",
+    // which the UI needs to tell apart from a genuine computed value,
+    // not from each other (both render as "not available" rather than
+    // a wrong number).
+    competitionHandicap: number | null;
+  }[];
 }
 
 /**
@@ -329,7 +350,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const { data: event, error } = await supabase
     .from("events")
     .select(
-      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, leaderboard_confirmed_at, winner_player_id, course_id, courses(name), winner:players!events_winner_player_id_fkey(first_name, last_name)"
+      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
     )
     .eq("id", eventId)
     .eq("society_id", societyId)
@@ -340,19 +361,43 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
 
   const { data: regRows } = await supabase
     .from("event_registrations")
-    .select("player_id, registered_by, players!event_registrations_player_id_fkey(first_name, last_name)")
+    .select(
+      "player_id, registered_by, players!event_registrations_player_id_fkey(first_name, last_name, current_handicap)"
+    )
     .eq("event_id", eventId)
     .order("registered_at", { ascending: true });
 
   interface RawRegRow {
     player_id: string;
     registered_by: string;
-    players: { first_name: string; last_name: string } | null;
+    players: { first_name: string; last_name: string; current_handicap: number } | null;
   }
   const rawRegRows = (regRows ?? []) as unknown as RawRegRow[];
 
-  const course = event.courses as unknown as { name: string } | null;
+  const course = event.courses as unknown as {
+    name: string;
+    white_course_rating: number | null;
+    white_slope_rating: number | null;
+    yellow_course_rating: number | null;
+    yellow_slope_rating: number | null;
+  } | null;
   const winner = event.winner as unknown as { first_name: string; last_name: string } | null;
+
+  // Par isn't a stored column on courses — it's the sum of each hole's
+  // own par, same as CourseForm computes it client-side for display.
+  // Only needed when the toggle is on, but cheap enough to always fetch
+  // rather than branch the query on usesCompetitionHandicapIndex.
+  const { data: holeRows } = await supabase
+    .from("holes")
+    .select("par")
+    .eq("course_id", event.course_id)
+    .eq("society_id", societyId);
+  const coursePar = (holeRows ?? []).reduce((sum, h) => sum + h.par, 0);
+
+  const courseRating =
+    event.tee_color === "white" ? course?.white_course_rating : course?.yellow_course_rating;
+  const slopeRating =
+    event.tee_color === "white" ? course?.white_slope_rating : course?.yellow_slope_rating;
 
   return {
     id: event.id,
@@ -365,16 +410,26 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
     format: event.format,
     handicapCutForWinner: event.handicap_cut_for_winner,
     usesCompetitionHandicapIndex: event.uses_competition_handicap_index,
+    teeColor: event.tee_color,
     leaderboardConfirmedAt: event.leaderboard_confirmed_at,
     winnerPlayerId: event.winner_player_id,
     winnerPlayerName: winner ? `${winner.first_name} ${winner.last_name}` : null,
     courseId: event.course_id,
     courseName: course?.name ?? "Unknown course",
-    registrations: rawRegRows.map((r) => ({
-      playerId: r.player_id,
-      playerName: r.players ? `${r.players.first_name} ${r.players.last_name}` : "Unknown player",
-      registeredBy: r.registered_by,
-    })),
+    registrations: rawRegRows.map((r) => {
+      const handicap = r.players?.current_handicap ?? 0;
+      const competitionHandicap =
+        event.uses_competition_handicap_index && courseRating != null && slopeRating != null
+          ? computeCourseHandicap(handicap, slopeRating, courseRating, coursePar)
+          : null;
+      return {
+        playerId: r.player_id,
+        playerName: r.players ? `${r.players.first_name} ${r.players.last_name}` : "Unknown player",
+        registeredBy: r.registered_by,
+        handicap,
+        competitionHandicap,
+      };
+    }),
   };
 }
 

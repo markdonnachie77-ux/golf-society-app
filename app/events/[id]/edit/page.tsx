@@ -47,6 +47,7 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
                 format: event.format,
                 handicapCutForWinner: event.handicapCutForWinner,
                 usesCompetitionHandicapIndex: event.usesCompetitionHandicapIndex,
+                teeColor: event.teeColor,
               }}
               courses={courses}
             />

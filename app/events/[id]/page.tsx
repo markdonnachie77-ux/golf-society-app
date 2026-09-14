@@ -193,6 +193,11 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Who's registered</CardTitle>
+            <CardDescription>
+              {event.usesCompetitionHandicapIndex
+                ? `Competition Handicap (${event.teeColor === "white" ? "White" : "Yellow"} tees)`
+                : "Handicap"}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {event.registrations.length === 0 ? (
@@ -202,7 +207,22 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
                 {event.registrations.map((r) => (
                   <li key={r.playerId} className="flex items-center justify-between">
                     <span className="text-sm">{r.playerName}</span>
-                    {isAdmin && <AdminRemoveRegistrationButton eventId={event.id} playerId={r.playerId} />}
+                    <span className="flex items-center gap-3">
+                      <span className="font-numeral text-sm text-muted-foreground">
+                        {event.usesCompetitionHandicapIndex ? (
+                          r.competitionHandicap !== null ? (
+                            r.competitionHandicap
+                          ) : (
+                            <span className="text-xs italic">rating not set</span>
+                          )
+                        ) : (
+                          r.handicap
+                        )}
+                      </span>
+                      {isAdmin && (
+                        <AdminRemoveRegistrationButton eventId={event.id} playerId={r.playerId} />
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>

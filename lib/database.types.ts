@@ -376,6 +376,7 @@ export interface Database {
           format: EventFormat;
           handicap_cut_for_winner: number;
           uses_competition_handicap_index: boolean;
+          tee_color: TeeColor;
           leaderboard_confirmed_at: string | null;
           leaderboard_confirmed_by: string | null;
           winner_player_id: string | null;
@@ -396,6 +397,7 @@ export interface Database {
           format?: EventFormat;
           handicap_cut_for_winner?: number;
           uses_competition_handicap_index?: boolean;
+          tee_color?: TeeColor;
           leaderboard_confirmed_at?: string | null;
           leaderboard_confirmed_by?: string | null;
           winner_player_id?: string | null;

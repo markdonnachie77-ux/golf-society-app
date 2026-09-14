@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  computeCourseHandicap,
   roundHandicapForAllocation,
   strokesReceivedOnHole,
   netStrokesForHole,
@@ -10,6 +11,33 @@ import {
   targetStablefordPoints,
   proposedHandicapChange,
 } from "@/lib/golf-math";
+
+describe("computeCourseHandicap", () => {
+  it("matches the standard WHS reference example", () => {
+    // Handicap Index 10.5, Slope 130, Course Rating 71.5, Par 72
+    expect(computeCourseHandicap(10.5, 130, 71.5, 72)).toBe(12);
+  });
+
+  it("gives 0 for a scratch golfer on an average-slope course where rating equals par", () => {
+    expect(computeCourseHandicap(0, 113, 72, 72)).toBe(0);
+  });
+
+  it("leaves the handicap unchanged at average slope with rating=par", () => {
+    expect(computeCourseHandicap(18, 113, 70, 70)).toBe(18);
+  });
+
+  it("increases the course handicap for a harder-than-average slope", () => {
+    expect(computeCourseHandicap(18, 140, 70, 70)).toBeGreaterThan(18);
+  });
+
+  it("decreases the course handicap for an easier-than-average slope", () => {
+    expect(computeCourseHandicap(18, 100, 70, 70)).toBeLessThan(18);
+  });
+
+  it("handles plus (negative) handicap players", () => {
+    expect(computeCourseHandicap(-2, 113, 72, 72)).toBe(-2);
+  });
+});
 
 describe("roundHandicapForAllocation", () => {
   it("rounds half-up", () => {
