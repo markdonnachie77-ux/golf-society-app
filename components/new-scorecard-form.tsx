@@ -99,6 +99,17 @@ export function NewScorecardForm({
   const selectedCourse = courses.find((c) => c.id === courseId) ?? null;
   const roundTypeOptions = selectedCourse ? allowedRoundTypes(selectedCourse.hole_count) : [];
 
+  // The target player's own ordinary handicap, regardless of whatever's
+  // currently typed into playingHandicap — needed as the fallback value
+  // when an event locks the field but its Competition Handicap couldn't
+  // be computed (missing Course/Slope Rating), since the field must
+  // show *something* correct, not just repeat whatever was there
+  // before this player/event was selected.
+  const targetPlayerNormalHandicap =
+    onBehalfOfPlayerId === viewerPlayerId
+      ? defaultHandicap
+      : (allPlayers.find((p) => p.id === onBehalfOfPlayerId)?.current_handicap ?? defaultHandicap);
+
   // Only events that genuinely match the round actually being logged —
   // same course, same date — not every event the player happens to be
   // registered for. Recomputed on every render from candidateEvents
@@ -107,6 +118,35 @@ export function NewScorecardForm({
   const matchingEvents = candidateEvents.filter(
     (e) => e.courseId === courseId && e.eventDate === playedAt
   );
+
+  const selectedEvent = matchingEvents.find((e) => e.id === selectedEventId) ?? null;
+  // Locked directly with the user: Playing Handicap becomes read-only
+  // (computed server-side, never trusted from the client either) when
+  // the selected event uses Competition Handicap Index — same
+  // reasoning extends to tee color, since the round's tee must match
+  // the event's tee for the calculation to mean anything.
+  const isLockedByEvent = selectedEvent?.usesCompetitionHandicapIndex ?? false;
+
+  /** Selecting an event that uses Competition Handicap Index locks the
+   * tee and playing handicap to that event's values — always resets
+   * both to the computed/correct value on selection, not whatever was
+   * previously typed, since a manually-edited value from before the
+   * event was picked could be wrong. Falls back to the player's normal
+   * handicap when competitionHandicap is null (missing Course/Slope
+   * Rating), confirmed directly with the user rather than blocking
+   * submission — matches what createScorecard does server-side too, so
+   * the number shown here is never contradicted by what actually gets
+   * saved. Choosing a non-locking event, or clearing the selection,
+   * intentionally leaves both fields exactly as they were — nothing to
+   * revert to once the player may have already adjusted them. */
+  function handleEventChange(eventId: string) {
+    setSelectedEventId(eventId);
+    const chosen = matchingEvents.find((e) => e.id === eventId);
+    if (chosen?.usesCompetitionHandicapIndex) {
+      setTeeColor(chosen.teeColor);
+      setPlayingHandicap(String(chosen.competitionHandicap ?? targetPlayerNormalHandicap));
+    }
+  }
 
   React.useEffect(() => {
     if (selectedEventId && !matchingEvents.some((e) => e.id === selectedEventId)) {
@@ -299,7 +339,13 @@ export function NewScorecardForm({
             </div>
             <div className="space-y-1.5">
               <Label>Tees played</Label>
-              <TeeColorToggle value={teeColor} onChange={setTeeColor} disabled={pending} />
+              <TeeColorToggle value={teeColor} onChange={setTeeColor} disabled={pending || isLockedByEvent} />
+              {isLockedByEvent && (
+                <p className="text-xs text-muted-foreground">
+                  Set by {selectedEvent?.name} — everyone plays the same tee for Competition
+                  Handicap Index.
+                </p>
+              )}
             </div>
           </div>
 
@@ -335,8 +381,16 @@ export function NewScorecardForm({
                 inputMode="decimal"
                 value={playingHandicap}
                 onChange={(e) => setPlayingHandicap(e.target.value)}
+                disabled={isLockedByEvent}
                 required
               />
+              {isLockedByEvent && (
+                <p className="text-xs text-muted-foreground">
+                  {selectedEvent?.competitionHandicap !== null
+                    ? `Competition Handicap for ${selectedEvent?.name} (${selectedEvent?.teeColor} tees).`
+                    : `${selectedEvent?.name} uses Competition Handicap Index, but the course isn't rated for its tee yet — using the normal handicap instead.`}
+                </p>
+              )}
             </div>
           </div>
 
@@ -346,7 +400,7 @@ export function NewScorecardForm({
               <select
                 id="eventId"
                 value={selectedEventId}
-                onChange={(e) => setSelectedEventId(e.target.value)}
+                onChange={(e) => handleEventChange(e.target.value)}
                 className="flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 text-base text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
               >
                 <option value="">Just a normal round — not for an event</option>

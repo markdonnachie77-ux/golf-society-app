@@ -769,6 +769,17 @@ export interface RegisteredEventOption {
   name: string;
   eventDate: string;
   courseId: string;
+  usesCompetitionHandicapIndex: boolean;
+  teeColor: TeeColor;
+  // Computed the same way getEventDetail computes it for the "Who's
+  // registered" list — null means either the toggle is off, or the
+  // course is missing Course/Slope Rating for this event's tee. The
+  // form falls back to the player's normal handicap in that case
+  // (confirmed directly with the user), same as createScorecard does
+  // server-side — this value existing client-side is purely so the
+  // locked field can show the right number before submission, not a
+  // second source of truth createScorecard will trust.
+  competitionHandicap: number | null;
 }
 
 /**
@@ -810,7 +821,9 @@ export async function listRegisteredEventsForRoundLogging(
 
   const { data, error } = await supabase
     .from("events")
-    .select("id, name, event_date, course_id")
+    .select(
+      "id, name, event_date, course_id, uses_competition_handicap_index, tee_color, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
+    )
     .in("id", eventIds)
     .eq("society_id", societyId)
     .eq("status", "published")
@@ -818,12 +831,56 @@ export async function listRegisteredEventsForRoundLogging(
 
   if (error || !data) return [];
 
-  return data.map((e) => ({
-    id: e.id,
-    name: e.name,
-    eventDate: e.event_date,
-    courseId: e.course_id,
-  }));
+  const { data: playerRow } = await supabase
+    .from("players")
+    .select("current_handicap")
+    .eq("id", playerId)
+    .eq("society_id", societyId)
+    .maybeSingle();
+  const handicap = playerRow?.current_handicap ?? 0;
+
+  // Par isn't a stored column — same reasoning as getEventDetail. Only
+  // fetched once, covering every candidate course's holes in one query,
+  // since there are normally only 0-2 matching events at a time.
+  const courseIds = data.map((e) => e.course_id);
+  const { data: holeRows } = await supabase
+    .from("holes")
+    .select("course_id, par")
+    .in("course_id", courseIds)
+    .eq("society_id", societyId);
+  const parByCourseId = new Map<string, number>();
+  for (const h of holeRows ?? []) {
+    parByCourseId.set(h.course_id, (parByCourseId.get(h.course_id) ?? 0) + h.par);
+  }
+
+  return data.map((e) => {
+    const course = e.courses as unknown as {
+      white_course_rating: number | null;
+      white_slope_rating: number | null;
+      yellow_course_rating: number | null;
+      yellow_slope_rating: number | null;
+    } | null;
+    const courseRating =
+      e.tee_color === "white" ? course?.white_course_rating : course?.yellow_course_rating;
+    const slopeRating =
+      e.tee_color === "white" ? course?.white_slope_rating : course?.yellow_slope_rating;
+    const par = parByCourseId.get(e.course_id) ?? 0;
+
+    const competitionHandicap =
+      e.uses_competition_handicap_index && courseRating != null && slopeRating != null
+        ? computeCourseHandicap(handicap, slopeRating, courseRating, par)
+        : null;
+
+    return {
+      id: e.id,
+      name: e.name,
+      eventDate: e.event_date,
+      courseId: e.course_id,
+      usesCompetitionHandicapIndex: e.uses_competition_handicap_index,
+      teeColor: e.tee_color,
+      competitionHandicap,
+    };
+  });
 }
 
 // ---------- Dashboard "log your round" reminder ----------

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { requireSession, requireAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getCurrentSocietyId } from "@/lib/tenant";
-import { computeRound, proposedHandicapChange, type RoundType } from "@/lib/golf-math";
+import { computeRound, proposedHandicapChange, computeCourseHandicap, type RoundType } from "@/lib/golf-math";
 import { filterHolesForRoundType } from "@/lib/round-setup";
 import type { ActionResult } from "@/app/actions/auth";
 import { getAppSettings } from "@/lib/app-settings";
@@ -139,7 +139,14 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     return { ok: false, error: "Enter a score for every hole before submitting." };
   }
 
-  const { courseId, teeColor, roundType, playedAt, playingHandicap } = parsed.data;
+  const { courseId, teeColor, roundType, playedAt, playingHandicap: submittedPlayingHandicap } =
+    parsed.data;
+  // Reassigned below when the round is linked to an event that uses
+  // Competition Handicap Index — the client-submitted value is only
+  // ever the starting point, never trusted outright, matching how the
+  // rest of this function re-derives every score total server-side
+  // rather than accepting what the client computed.
+  let playingHandicap = submittedPlayingHandicap;
 
   // Optional: this round can be tagged as played "for" an event the
   // target player (self, or the admin's on-behalf target) is registered
@@ -157,7 +164,9 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
 
     const { data: event } = await supabase
       .from("events")
-      .select("id, course_id, event_date, status")
+      .select(
+        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
+      )
       .eq("id", eventIdRaw)
       .eq("society_id", societyId)
       .maybeSingle();
@@ -182,6 +191,58 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
 
     if (!registration) {
       return { ok: false, error: "This player isn't registered for that event." };
+    }
+
+    // Confirmed directly with the user: an event using Competition
+    // Handicap Index requires the round's own tee to match the event's
+    // tee (everyone plays the same tee for the calculation to mean
+    // anything), and the Playing Handicap field is fully server-computed
+    // here — never the client-submitted value — falling back to the
+    // player's ordinary handicap when the course isn't rated for that
+    // tee rather than blocking submission entirely.
+    if (event.uses_competition_handicap_index) {
+      if (teeColor !== event.tee_color) {
+        return {
+          ok: false,
+          error: `This event uses ${event.tee_color} tees for its Competition Handicap — round submissions must use the same tee.`,
+        };
+      }
+
+      const { data: targetPlayer } = await supabase
+        .from("players")
+        .select("current_handicap")
+        .eq("id", targetPlayerId)
+        .eq("society_id", societyId)
+        .maybeSingle();
+      const normalHandicap = targetPlayer?.current_handicap ?? playingHandicap;
+
+      const course = event.courses as unknown as {
+        white_course_rating: number | null;
+        white_slope_rating: number | null;
+        yellow_course_rating: number | null;
+        yellow_slope_rating: number | null;
+      } | null;
+      const courseRating =
+        event.tee_color === "white" ? course?.white_course_rating : course?.yellow_course_rating;
+      const slopeRating =
+        event.tee_color === "white" ? course?.white_slope_rating : course?.yellow_slope_rating;
+
+      if (courseRating != null && slopeRating != null) {
+        const { data: eventHoleRows } = await supabase
+          .from("holes")
+          .select("par")
+          .eq("course_id", event.course_id)
+          .eq("society_id", societyId);
+        const eventCoursePar = (eventHoleRows ?? []).reduce((sum, h) => sum + h.par, 0);
+        playingHandicap = computeCourseHandicap(
+          normalHandicap,
+          slopeRating,
+          courseRating,
+          eventCoursePar
+        );
+      } else {
+        playingHandicap = normalHandicap;
+      }
     }
 
     linkedEventId = eventIdRaw;

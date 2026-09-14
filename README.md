@@ -846,6 +846,58 @@ database or in a URL query param, since this is genuinely the first
 case where neither fit: too trivial for a database round-trip, and not
 meaningful to put in a shareable URL.
 
+## Competition Handicap Index actually drives scoring, not just display
+
+Fourth and final step: a round logged for an event that uses
+Competition Handicap Index now genuinely uses that computed number for
+scoring — stroke allocation, net stroke play, Stableford points, all of
+it — not just a number shown on the event page.
+
+**Playing Handicap becomes read-only when logging such a round**
+(confirmed directly with the user), pre-filled with the same
+`competitionHandicap` value already computed for the "Who's
+registered" list — `listRegisteredEventsForRoundLogging`
+(`app/actions/events.ts`) now returns it directly per candidate event,
+alongside `usesCompetitionHandicapIndex` and `teeColor`, so the form
+can lock the field to the right number the moment an event is
+selected, before anything is submitted.
+
+**The server never trusts that client-side value, same as everywhere
+else in this app.** `createScorecard` independently re-fetches the
+event, the course's ratings, the target player's actual
+`current_handicap`, and the course's par, then recomputes the
+Competition Handicap itself — overwriting whatever `playingHandicap`
+the client submitted. Verified this specifically: a deliberately
+fabricated client value gets silently discarded and replaced with the
+correct server-computed number whenever the event's toggle is on,
+exactly the way createScorecard already refuses to trust
+client-computed score totals elsewhere in this same function.
+
+**Missing ratings fall back to the player's normal handicap, both
+client and server side** (confirmed directly with the user, not
+blocking submission) — the form shows this explicitly ("the course
+isn't rated for its tee yet — using the normal handicap instead"), and
+the server independently makes the identical decision rather than
+trusting that the form's explanation was accurate.
+
+**The round's own tee color must match the event's tee** (confirmed
+directly with the user) — submitting from a different tee is rejected
+outright with a clear error, since Competition Handicap only means
+anything when the tee the round's stroke indices come from is the
+same tee the handicap was computed for. The form prevents this from
+ever happening in practice by locking the tee toggle to the event's
+tee the moment such an event is selected, disabled so it can't be
+changed back — the server-side rejection is the backstop for a
+crafted request, not the primary way most people would encounter it.
+
+**Selecting a locking event always resets both fields to the correct
+computed values**, never leaving whatever was previously typed —
+manually-edited values from before the event was picked could be
+wrong, and a locked-but-stale field would be worse than no lock at
+all. Choosing a non-locking event, or clearing the selection entirely,
+deliberately leaves both fields exactly as they were, with nothing to
+revert to.
+
 ## Course Handicap calculation and display (`0022_event_tee_color.sql`)
 
 Third step: the "Who's registered" list on an event page now actually
