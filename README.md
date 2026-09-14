@@ -1319,6 +1319,49 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
+## Middleware's Supabase fetch had no timeout — real production bug
+
+Found from a live symptom, not proactively: slow button clicks across
+the whole app, intermittently coinciding with "No society_id header
+found on this request" errors downstream. The two are the same root
+cause. `fetchSociety` in `middleware.ts` makes an unbounded `fetch()`
+call to Supabase — no timeout at all — and *every single request*
+through this app waits on it, since middleware runs before anything
+else, including every server action a button click triggers. A slow
+Supabase response doesn't just delay the one request that needed
+it — it delays everything.
+
+**Confirmed against Vercel's own documentation for
+`MIDDLEWARE_INVOCATION_TIMEOUT`**, not just inferred from the
+symptoms — that page explicitly recommends "specifying a fetch timeout
+for external calls using `AbortSignal.timeout`" for exactly this
+situation, and states plainly that middleware must begin responding
+within 25 seconds or Vercel forcibly terminates it. That termination
+mid-flight — before `NextResponse.next(withTenantHeader)` ever runs —
+is what would produce the missing-header error: not middleware failing
+to run at all, but middleware being cut off before it could finish.
+
+**Fixed with `AbortSignal.timeout(3000)`** on the fetch — 3 seconds,
+generous for normal Supabase latency but nowhere near the 25-second
+hard limit. A timeout throws a standard, catchable `TimeoutError`,
+already covered by the existing `catch { return null; }` — and for the
+default-society lookup specifically, a `null` result is deliberately
+*not* cached (see the comment already on that line, predating this
+fix, about not freezing the whole site down after a transient
+failure), so a timeout here gets retried on the very next request
+rather than persisting.
+
+**Verified the timeout mechanism directly**, not just assumed the API
+exists — ran a real fetch against a local server that never responds,
+confirming `AbortSignal.timeout(1000)` aborts at ~1000ms with a
+`TimeoutError` that a plain `try/catch` handles cleanly, rather than
+hanging or needing special handling. A non-routable IP address was
+tried first and gave an inconclusive result (this sandbox's own
+network egress restrictions likely rejected it immediately, differently
+from how a genuinely slow-but-reachable server behaves) — worth noting
+in case that same gap matters for testing anything else client-side in
+this environment.
+
 ## Login/register now honor a `next` redirect param
 
 This exists specifically to make the sign-up PDF's QR code work while

@@ -54,6 +54,19 @@ interface ResolvedSociety {
 const societyCache = new Map<string, { society: ResolvedSociety | null; expiresAt: number }>();
 const CACHE_TTL_MS = 60_000;
 
+// Every request through middleware waits on this fetch — an unbounded
+// fetch() here means one slow Supabase response makes every single
+// click in the app feel slow, not just the one request that triggered
+// it, since middleware runs before anything else. Failing fast on a
+// hang is strictly better than blocking indefinitely: the transient-
+// failure-not-cached behavior below already means a fast failure gets
+// retried on the very next request, so there's no downside to timing
+// out aggressively here — only upside, since an unbounded hang risks
+// Vercel's own function-level timeout killing the request mid-flight,
+// which is a much worse, less predictable failure mode than this fetch
+// itself failing cleanly first.
+const FETCH_TIMEOUT_MS = 3000;
+
 async function fetchSociety(filterColumn: "slug" | "id", filterValue: string): Promise<ResolvedSociety | null> {
   const cacheKey = `${filterColumn}:${filterValue}`;
   const cached = societyCache.get(cacheKey);
@@ -68,7 +81,10 @@ async function fetchSociety(filterColumn: "slug" | "id", filterValue: string): P
   try {
     const response = await fetch(
       `${url}/rest/v1/societies?${filterColumn}=eq.${encodeURIComponent(filterValue)}&select=id,slug,name`,
-      { headers: { apikey: key, Authorization: `Bearer ${key}` } }
+      {
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      }
     );
     if (!response.ok) return null;
 
