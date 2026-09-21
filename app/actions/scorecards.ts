@@ -156,6 +156,13 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   // any event and pollute its leaderboard.
   const eventIdRaw = String(formData.get("eventId") ?? "").trim();
   let linkedEventId: string | null = null;
+  // Set below, inside the event-linking block, only when the linked
+  // event has a non-zero override for that specific rate — null here
+  // means "no override, use the course's own rate", the normal case
+  // for the vast majority of rounds (not linked to an event at all, or
+  // linked to one that doesn't override either rate).
+  let cutPerPointOverride: number | null = null;
+  let increasePerPointOverride: number | null = null;
 
   if (eventIdRaw) {
     if (!z.string().uuid().safeParse(eventIdRaw).success) {
@@ -165,7 +172,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     const { data: event } = await supabase
       .from("events")
       .select(
-        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
+        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, handicap_cut_per_point, handicap_increase_per_point, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
       )
       .eq("id", eventIdRaw)
       .eq("society_id", societyId)
@@ -191,6 +198,20 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
 
     if (!registration) {
       return { ok: false, error: "This player isn't registered for that event." };
+    }
+
+    // Per-event override of the course's own handicap cut/increase
+    // rates — confirmed directly with the user: 0 (the column's own
+    // default) means "use the course's rate", not "override to zero",
+    // so only a genuinely non-zero value here actually overrides
+    // anything. Independent of the Competition Handicap Index logic
+    // below — an event can override these rates whether or not it also
+    // uses Competition Handicap Index.
+    if (event.handicap_cut_per_point !== 0) {
+      cutPerPointOverride = event.handicap_cut_per_point;
+    }
+    if (event.handicap_increase_per_point !== 0) {
+      increasePerPointOverride = event.handicap_increase_per_point;
     }
 
     // Confirmed directly with the user: an event using Competition
@@ -305,8 +326,8 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
 
   const { holeResults, summary } = computeRound(holeInputs, playingHandicap, roundType);
   const change = proposedHandicapChange(summary.totalStablefordPoints, roundType, {
-    handicapCutPerPoint: course.handicap_cut_per_point,
-    handicapIncreasePerPoint: course.handicap_increase_per_point,
+    handicapCutPerPoint: cutPerPointOverride ?? course.handicap_cut_per_point,
+    handicapIncreasePerPoint: increasePerPointOverride ?? course.handicap_increase_per_point,
   });
 
   const { data: scorecard, error: scorecardError } = await supabase

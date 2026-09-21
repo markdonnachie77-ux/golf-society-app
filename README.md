@@ -1319,6 +1319,41 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
+## Per-event handicap cut/increase rate override (`0024_event_handicap_rate_override.sql`)
+
+Two more event fields, mirroring `courses.handicap_cut_per_point` /
+`handicap_increase_per_point` exactly (same 0–9.99 range) — but with a
+deliberately different meaning for zero. At the course level, 0 is a
+genuine, meaningful rate (the form's own helper text: "Set to 0 for a
+buffered zone"). At the event level, per an explicit design decision
+confirmed directly with the user rather than inferred, 0 means
+something else entirely: "no override — use the course's own rate for
+rounds tied to this event." Only a genuinely nonzero value overrides
+anything. This is a real, accepted limitation, not an oversight: an
+event cannot override a course's nonzero rate down to exactly 0,
+because 0 is reserved to mean "not overriding."
+
+**The two rates are independent overrides, not a linked pair.** An
+event can override just the cut rate while the increase rate still
+falls through to the course's own value, or vice versa, or both, or
+neither. Verified this specifically — the case most likely to be
+gotten wrong by treating them as one setting instead of two — along
+with the ordinary no-override and both-overridden cases, and the edge
+case where the course's own rate happens to already be 0 and the event
+doesn't override (result should be genuinely 0, not confused with "no
+override signal").
+
+**`proposedHandicapChange` itself needed no changes at all.** It's
+always taken a plain `{ handicapCutPerPoint, handicapIncreasePerPoint }`
+object as input, agnostic to where those numbers come from — so the
+override logic lives entirely in `createScorecard`, the one caller that
+actually has both the course's and the event's rates in hand. Two
+`number | null` variables, set only when the linked event's rate is
+genuinely nonzero, resolved with `??` against the course's own rate
+immediately before the `proposedHandicapChange` call — the smallest
+possible change that could implement this, rather than threading an
+override concept through the calculation function itself.
+
 ## Deposit and remaining balance on events (`0023_event_deposit_balance.sql`)
 
 Two purely informational fields on an event, in GBP — no calculation,

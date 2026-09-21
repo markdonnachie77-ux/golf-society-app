@@ -20,6 +20,8 @@ export interface EventFormInitialData {
   teeColor: "white" | "yellow";
   depositGbp: number | null;
   remainingBalanceGbp: number | null;
+  handicapCutPerPointOverride: number;
+  handicapIncreasePerPointOverride: number;
 }
 
 interface EventFormProps {
@@ -60,6 +62,12 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
   const [remainingBalanceGbp, setRemainingBalanceGbp] = React.useState(
     initial?.remainingBalanceGbp != null ? String(initial.remainingBalanceGbp) : ""
   );
+  const [handicapCutPerPointOverride, setHandicapCutPerPointOverride] = React.useState(
+    String(initial?.handicapCutPerPointOverride ?? "0")
+  );
+  const [handicapIncreasePerPointOverride, setHandicapIncreasePerPointOverride] = React.useState(
+    String(initial?.handicapIncreasePerPointOverride ?? "0")
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
@@ -83,6 +91,8 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("teeColor", teeColor);
     formData.set("depositGbp", depositGbp);
     formData.set("remainingBalanceGbp", remainingBalanceGbp);
+    formData.set("handicapCutPerPointOverride", handicapCutPerPointOverride);
+    formData.set("handicapIncreasePerPointOverride", handicapIncreasePerPointOverride);
 
     const result = await onSubmit(formData);
     if (!result.ok) {
@@ -305,6 +315,60 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
         Informational only — shown on the event page and sign-up sheet, not tied to
         registration or payment tracking.
       </p>
+
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="handicapCutPerPointOverride">
+            Handicap cut rate override (per point over target)
+          </Label>
+          {/* Same text+inputMode=decimal pattern as the course-level
+              cutRate field in CourseForm. Unlike that field, 0 here
+              doesn't mean "a buffered zone" — it means "no override,
+              use the course's own rate for rounds tied to this
+              event". Confirmed directly with the user as the intended
+              design: an event genuinely cannot override to exactly 0
+              if the course's rate is nonzero. */}
+          <Input
+            id="handicapCutPerPointOverride"
+            type="text"
+            inputMode="decimal"
+            value={handicapCutPerPointOverride}
+            onChange={(e) => setHandicapCutPerPointOverride(e.target.value)}
+            disabled={pending}
+            required
+          />
+          <p className="text-xs text-muted-foreground">
+            0 = use the course&apos;s own rate. Nonzero overrides it for rounds tied to this
+            event.
+          </p>
+          {fieldErrors.handicapCutPerPointOverride && (
+            <p className="text-sm text-destructive">{fieldErrors.handicapCutPerPointOverride}</p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="handicapIncreasePerPointOverride">
+            Handicap increase rate override (per point under target)
+          </Label>
+          <Input
+            id="handicapIncreasePerPointOverride"
+            type="text"
+            inputMode="decimal"
+            value={handicapIncreasePerPointOverride}
+            onChange={(e) => setHandicapIncreasePerPointOverride(e.target.value)}
+            disabled={pending}
+            required
+          />
+          <p className="text-xs text-muted-foreground">
+            0 = use the course&apos;s own rate. Nonzero overrides it for rounds tied to this
+            event.
+          </p>
+          {fieldErrors.handicapIncreasePerPointOverride && (
+            <p className="text-sm text-destructive">
+              {fieldErrors.handicapIncreasePerPointOverride}
+            </p>
+          )}
+        </div>
+      </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

@@ -379,6 +379,8 @@ export interface Database {
           tee_color: TeeColor;
           deposit_gbp: number | null;
           remaining_balance_gbp: number | null;
+          handicap_cut_per_point: number;
+          handicap_increase_per_point: number;
           leaderboard_confirmed_at: string | null;
           leaderboard_confirmed_by: string | null;
           winner_player_id: string | null;
@@ -402,6 +404,8 @@ export interface Database {
           tee_color?: TeeColor;
           deposit_gbp?: number | null;
           remaining_balance_gbp?: number | null;
+          handicap_cut_per_point?: number;
+          handicap_increase_per_point?: number;
           leaderboard_confirmed_at?: string | null;
           leaderboard_confirmed_by?: string | null;
           winner_player_id?: string | null;
