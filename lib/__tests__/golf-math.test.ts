@@ -275,4 +275,81 @@ describe("proposedHandicapChange", () => {
     // 39 points vs target 36 -> diff 3 -> -(3 * 0.15) = -0.45
     expect(proposedHandicapChange(39, "full_18", oddRateCourse)).toBe(-0.45);
   });
+
+});
+
+describe("proposedHandicapChange — cutTargetOverride", () => {
+  const standardCourse = { handicapCutPerPoint: 0.2, handicapIncreasePerPoint: 0.1 };
+
+  it("undefined/null override behaves identically to no override at all", () => {
+    const withUndefined = proposedHandicapChange(40, "full_18", standardCourse, undefined);
+    const withNull = proposedHandicapChange(40, "full_18", standardCourse, null);
+    const withoutParam = proposedHandicapChange(40, "full_18", standardCourse);
+    expect(withUndefined).toBe(withoutParam);
+    expect(withNull).toBe(withoutParam);
+  });
+
+  it("cut wins in the gap: a lowered override cuts a score that would otherwise have increased", () => {
+    // Cut target 33, standard target 36. Score 34: above 33 (cut), but
+    // also below 36 (would look increase-eligible under the old single-
+    // target system) — cut must win, per the user's explicit, confirmed
+    // decision, not increase.
+    // diff = 34 - 33 = 1 -> -(1 * 0.2)
+    expect(proposedHandicapChange(34, "full_18", standardCourse, 33)).toBeCloseTo(-0.2);
+  });
+
+  it("increase still anchors to the standard target (36), completely unaware of a lowered cut override", () => {
+    // Score 30, well below both 33 and 36 -> increase, based on the
+    // STANDARD target (36), not the override (33).
+    // diff = 36 - 30 = 6 -> 6 * 0.1
+    expect(proposedHandicapChange(30, "full_18", standardCourse, 33)).toBeCloseTo(0.6);
+  });
+
+  it("a lowered override changes the CUT basis too, not just which scores get cut", () => {
+    // Score 40 with override 33 -> cut basis is 33, not 36.
+    // diff = 40 - 33 = 7 -> -(7 * 0.2), NOT -(4 * 0.2) as it would be
+    // without the override.
+    expect(proposedHandicapChange(40, "full_18", standardCourse, 33)).toBeCloseTo(-1.4);
+  });
+
+  it("exactly at the lowered override falls through to the (still-standard) increase check", () => {
+    // Score 33 exactly, override 33: 33 is NOT > 33 (strict inequality,
+    // matching the pre-existing convention for exact-target scores), so
+    // this doesn't cut. It IS < 36, so it increases, anchored to 36.
+    // diff = 36 - 33 = 3 -> 3 * 0.1
+    expect(proposedHandicapChange(33, "full_18", standardCourse, 33)).toBeCloseTo(0.3);
+  });
+
+  it("a raised override creates a dead zone between 36 and the override where nothing happens", () => {
+    // Override 40. Score 38: not > 40 (no cut), not < 36 (no increase
+    // either, since increase is unaffected by the raised cut override) -> 0.
+    expect(proposedHandicapChange(38, "full_18", standardCourse, 40)).toBe(0);
+  });
+
+  it("a raised override still cuts once a score clears it, using the raised value as the basis", () => {
+    // Override 40. Score 42: diff = 42 - 40 = 2 -> -(2 * 0.2)
+    expect(proposedHandicapChange(42, "full_18", standardCourse, 40)).toBeCloseTo(-0.4);
+  });
+
+  it("a raised override leaves the increase side completely unchanged", () => {
+    // Override 40. Score 30: still increases based on the standard 36,
+    // exactly as if the override didn't exist.
+    // diff = 36 - 30 = 6 -> 6 * 0.1
+    expect(proposedHandicapChange(30, "full_18", standardCourse, 40)).toBeCloseTo(0.6);
+  });
+
+  it("scales the override proportionally for a 9-hole round, same ratio as the standard target's own 36->18 scaling", () => {
+    // Override 33 expressed at the 18-hole scale -> effective cut target
+    // for a 9-hole round is 33 * (18/36) = 16.5. Score 18 on the front 9:
+    // diff = 18 - 16.5 = 1.5 -> -(1.5 * 0.2)
+    expect(proposedHandicapChange(18, "front_9", standardCourse, 33)).toBeCloseTo(-0.3);
+  });
+
+  it("a 9-hole score below the scaled override but below the scaled standard target (18) still increases normally", () => {
+    // Override 33 -> scaled cut target 16.5 for 9 holes. Score 14: not >
+    // 16.5 (no cut), IS < 18 (standard 9-hole target) -> increase,
+    // anchored to 18, not 16.5.
+    // diff = 18 - 14 = 4 -> 4 * 0.1
+    expect(proposedHandicapChange(14, "front_9", standardCourse, 33)).toBeCloseTo(0.4);
+  });
 });

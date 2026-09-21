@@ -163,6 +163,13 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   // linked to one that doesn't override either rate).
   let cutPerPointOverride: number | null = null;
   let increasePerPointOverride: number | null = null;
+  // Independent of override_handicap_rates above — an event can set a
+  // custom cut-side Stableford target without touching the course's own
+  // rates at all, or vice versa. Null means "use the standard 36/18
+  // target", passed straight through to proposedHandicapChange's own
+  // cutTargetOverride parameter, which is where the actual "cut wins in
+  // the gap, increase stays anchored to standard" logic lives.
+  let cutTargetOverride: number | null = null;
 
   if (eventIdRaw) {
     if (!z.string().uuid().safeParse(eventIdRaw).success) {
@@ -172,7 +179,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     const { data: event } = await supabase
       .from("events")
       .select(
-        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
+        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, cut_target_override, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
       )
       .eq("id", eventIdRaw)
       .eq("society_id", societyId)
@@ -219,6 +226,10 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
       cutPerPointOverride = event.handicap_cut_per_point;
       increasePerPointOverride = event.handicap_increase_per_point;
     }
+    // Independent of override_handicap_rates above — set whenever the
+    // event has one, regardless of whether the rate-override checkbox
+    // is also on.
+    cutTargetOverride = event.cut_target_override;
 
     // Confirmed directly with the user: an event using Competition
     // Handicap Index requires the round's own tee to match the event's
@@ -331,10 +342,15 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   });
 
   const { holeResults, summary } = computeRound(holeInputs, playingHandicap, roundType);
-  const change = proposedHandicapChange(summary.totalStablefordPoints, roundType, {
-    handicapCutPerPoint: cutPerPointOverride ?? course.handicap_cut_per_point,
-    handicapIncreasePerPoint: increasePerPointOverride ?? course.handicap_increase_per_point,
-  });
+  const change = proposedHandicapChange(
+    summary.totalStablefordPoints,
+    roundType,
+    {
+      handicapCutPerPoint: cutPerPointOverride ?? course.handicap_cut_per_point,
+      handicapIncreasePerPoint: increasePerPointOverride ?? course.handicap_increase_per_point,
+    },
+    cutTargetOverride
+  );
 
   const { data: scorecard, error: scorecardError } = await supabase
     .from("scorecards")

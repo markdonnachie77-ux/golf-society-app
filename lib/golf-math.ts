@@ -238,6 +238,32 @@ export interface CourseRates {
  * course's own cut/increase rates. Negative = handicap decreases (player
  * beat the course), positive = handicap increases.
  *
+ * `cutTargetOverride`, when provided, replaces the standard target
+ * (36/18) as the threshold for the CUT side only — the increase side
+ * always uses the standard target, never this override. This is an
+ * explicit, confirmed-directly-with-the-user design, not a symmetric
+ * "shift both thresholds" feature: an event might set this to 33 so
+ * that anyone scoring over 33 gets cut, while a score of, say, 30 still
+ * increases based on the standard 36, completely unaware the cut
+ * threshold was ever touched.
+ *
+ * This creates a genuine, intentional asymmetry once the override
+ * differs from the standard target, resolved by priority, not by two
+ * independent checks that could both fire for the same round: the cut
+ * check runs first, so a score that clears the (possibly lowered) cut
+ * threshold is always cut — even if, under the old single-target
+ * system, that same score would have been below the standard target
+ * and looked increase-eligible. Only once the cut check doesn't fire
+ * does the (always-standard) increase check even run. Concretely, with
+ * a lowered override of 33: scoring 34 is cut (34 > 33), never
+ * increased, even though 34 < 36 — confirmed directly with the user as
+ * the intended behavior, not an edge case to guard against.
+ *
+ * Expressed at the full-18-hole scale (e.g. 33, comparable to the
+ * standard 36) — scaled proportionally for a 9-hole round, same ratio
+ * as the standard target's own 36→18 scaling, so an event's override
+ * means the same relative thing regardless of round type.
+ *
  * Rounded to 2 decimal places (matches the `numeric(4,2)` column) using
  * round-half-away-from-zero on cents to avoid binary float artifacts like
  * 0.1 + 0.2 !== 0.3.
@@ -245,16 +271,18 @@ export interface CourseRates {
 export function proposedHandicapChange(
   totalStablefordPoints: number,
   roundType: RoundType,
-  course: CourseRates
+  course: CourseRates,
+  cutTargetOverride?: number | null
 ): number {
-  const target = targetStablefordPoints(roundType);
-  const pointDifference = totalStablefordPoints - target;
+  const standardTarget = targetStablefordPoints(roundType);
+  const cutTarget =
+    cutTargetOverride != null ? cutTargetOverride * (standardTarget / 36) : standardTarget;
 
   let change: number;
-  if (pointDifference > 0) {
-    change = -(pointDifference * course.handicapCutPerPoint);
-  } else if (pointDifference < 0) {
-    change = Math.abs(pointDifference) * course.handicapIncreasePerPoint;
+  if (totalStablefordPoints > cutTarget) {
+    change = -((totalStablefordPoints - cutTarget) * course.handicapCutPerPoint);
+  } else if (totalStablefordPoints < standardTarget) {
+    change = (standardTarget - totalStablefordPoints) * course.handicapIncreasePerPoint;
   } else {
     change = 0;
   }

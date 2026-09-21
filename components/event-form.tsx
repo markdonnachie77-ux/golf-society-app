@@ -23,6 +23,7 @@ export interface EventFormInitialData {
   overrideHandicapRates: boolean;
   handicapCutPerPointOverride: number | null;
   handicapIncreasePerPointOverride: number | null;
+  cutTargetOverride: number | null;
 }
 
 interface EventFormProps {
@@ -74,6 +75,9 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
       ? String(initial.handicapIncreasePerPointOverride)
       : ""
   );
+  const [cutTargetOverride, setCutTargetOverride] = React.useState(
+    initial?.cutTargetOverride != null ? String(initial.cutTargetOverride) : ""
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
@@ -100,6 +104,7 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("overrideHandicapRates", String(overrideHandicapRates));
     formData.set("handicapCutPerPointOverride", handicapCutPerPointOverride);
     formData.set("handicapIncreasePerPointOverride", handicapIncreasePerPointOverride);
+    formData.set("cutTargetOverride", cutTargetOverride);
 
     const result = await onSubmit(formData);
     if (!result.ok) {
@@ -393,6 +398,32 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           </div>
         </div>
       )}
+
+      <div className="space-y-1.5">
+        <Label htmlFor="cutTargetOverride">Cut target override (Stableford points)</Label>
+        {/* Independent of the checkbox above — this can be set whether
+            or not the rate override is on, since it changes WHEN a cut
+            applies, not the rate used once it does. Empty means "use
+            the standard 36 (18 for a 9-hole round)". */}
+        <Input
+          id="cutTargetOverride"
+          type="text"
+          inputMode="numeric"
+          placeholder="e.g. 33 — leave blank for the standard 36"
+          value={cutTargetOverride}
+          onChange={(e) => setCutTargetOverride(e.target.value)}
+          disabled={pending}
+        />
+        <p className="text-xs text-muted-foreground">
+          Cutting only — increasing a handicap always uses the standard 36 (18 for 9 holes),
+          unaffected by this setting. If you lower this below 36, any score above it is cut
+          instead of increased — for example, with 33 set, a score of 34 is cut, not increased,
+          even though 34 is below 36.
+        </p>
+        {fieldErrors.cutTargetOverride && (
+          <p className="text-sm text-destructive">{fieldErrors.cutTargetOverride}</p>
+        )}
+      </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

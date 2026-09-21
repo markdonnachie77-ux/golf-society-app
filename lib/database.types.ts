@@ -382,6 +382,7 @@ export interface Database {
           override_handicap_rates: boolean;
           handicap_cut_per_point: number | null;
           handicap_increase_per_point: number | null;
+          cut_target_override: number | null;
           leaderboard_confirmed_at: string | null;
           leaderboard_confirmed_by: string | null;
           winner_player_id: string | null;
@@ -408,6 +409,7 @@ export interface Database {
           override_handicap_rates?: boolean;
           handicap_cut_per_point?: number | null;
           handicap_increase_per_point?: number | null;
+          cut_target_override?: number | null;
           leaderboard_confirmed_at?: string | null;
           leaderboard_confirmed_by?: string | null;
           winner_player_id?: string | null;

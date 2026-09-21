@@ -81,6 +81,19 @@ const eventDetailsSchema = z.object({
     .min(0, "Increase rate can't be negative")
     .max(9.99, "Increase rate looks too high")
     .nullable(),
+  // Cut-side-only Stableford target override — confirmed directly with
+  // the user: increase always uses the standard 36/18 target,
+  // regardless of this setting. Null (empty field) means "use the
+  // standard target" — unlike handicapCutPerPointOverride above, there's
+  // no plausible real threshold value that could be confused with "not
+  // set" here, so this doesn't need its own checkbox the way that field
+  // did; null is an unambiguous sentinel on its own.
+  cutTargetOverride: z
+    .number({ invalid_type_error: "Cut target must be a number" })
+    .int("Cut target must be a whole number")
+    .min(0, "Cut target can't be negative")
+    .max(99, "That cut target looks too high")
+    .nullable(),
 }).superRefine((data, ctx) => {
   if (data.overrideHandicapRates) {
     if (data.handicapCutPerPointOverride === null) {
@@ -137,6 +150,7 @@ function parseEventFormData(formData: FormData) {
       formData,
       "handicapIncreasePerPointOverride"
     ),
+    cutTargetOverride: parseOptionalNumberField(formData, "cutTargetOverride"),
   });
 }
 
@@ -174,6 +188,7 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       override_handicap_rates: data.overrideHandicapRates,
       handicap_cut_per_point: data.handicapCutPerPointOverride,
       handicap_increase_per_point: data.handicapIncreasePerPointOverride,
+      cut_target_override: data.cutTargetOverride,
       status: "draft",
       created_by: session.playerId,
       society_id: societyId,
@@ -231,6 +246,7 @@ export async function updateEvent(eventId: string, formData: FormData): Promise<
       override_handicap_rates: data.overrideHandicapRates,
       handicap_cut_per_point: data.handicapCutPerPointOverride,
       handicap_increase_per_point: data.handicapIncreasePerPointOverride,
+      cut_target_override: data.cutTargetOverride,
       updated_at: new Date().toISOString(),
     })
     .eq("id", eventId)
@@ -414,6 +430,7 @@ export interface EventDetail {
   overrideHandicapRates: boolean;
   handicapCutPerPointOverride: number | null;
   handicapIncreasePerPointOverride: number | null;
+  cutTargetOverride: number | null;
   leaderboardConfirmedAt: string | null;
   winnerPlayerId: string | null;
   winnerPlayerName: string | null;
@@ -448,7 +465,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const { data: event, error } = await supabase
     .from("events")
     .select(
-      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, deposit_gbp, remaining_balance_gbp, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
+      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, deposit_gbp, remaining_balance_gbp, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, cut_target_override, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
     )
     .eq("id", eventId)
     .eq("society_id", societyId)
@@ -514,6 +531,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
     overrideHandicapRates: event.override_handicap_rates,
     handicapCutPerPointOverride: event.handicap_cut_per_point,
     handicapIncreasePerPointOverride: event.handicap_increase_per_point,
+    cutTargetOverride: event.cut_target_override,
     leaderboardConfirmedAt: event.leaderboard_confirmed_at,
     winnerPlayerId: event.winner_player_id,
     winnerPlayerName: winner ? `${winner.first_name} ${winner.last_name}` : null,

@@ -1319,6 +1319,72 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
+## Per-event cut-side Stableford target override (`0026_event_cut_target_override.sql`)
+
+A per-event override of the standard Stableford target (36 for 18
+holes, 18 for 9) — but, per an explicit, carefully-confirmed design
+constraint, **cut side only**. Increasing a handicap always uses the
+standard target, completely unaffected by this setting, regardless of
+what it's set to. The UI note explains this directly, with a worked
+example, rather than leaving an admin to infer it: "Cutting only —
+increasing a handicap always uses the standard 36 (18 for 9 holes)...
+with 33 set, a score of 34 is cut, not increased, even though 34 is
+below 36."
+
+**This asymmetry creates a genuine conflict the design had to resolve
+explicitly, not something solved by the one-directional statement
+alone.** Confirmed directly with the user, through two rounds of
+back-and-forth — the first answer given didn't actually resolve it,
+and needed a concrete worked example before the real rule became
+clear: once the cut threshold is lowered below 36, a score in the gap
+between them (e.g. 34, with a threshold of 33) satisfies both "above
+the cut threshold" and "below the standard increase target" at once.
+The resolution is priority, not two independent checks that could both
+fire on the same round: the cut check runs first, so a score clearing
+the (possibly lowered) threshold is always cut, never increased, even
+if it would have looked increase-eligible under the old single-target
+system. Only when the cut check doesn't fire does the always-standard
+increase check even run.
+
+**One of the user's own draft explanations of this rule was
+internally inconsistent with an earlier, clearer statement they'd
+already made**, and got flagged rather than built as given — restating
+the (correct) rule back for explicit confirmation surfaced a likely
+typo before it could become a real miscalculation for a live event
+that reached "cut wins in the gap" but tried to also flip the
+increase side's direction, which would have contradicted "increasing
+always uses 36" from earlier in the same conversation.
+
+**Nullable, not a numeric sentinel** — unlike the rate-override fields
+(`0025`), which needed an explicit checkbox because 0 was a plausible
+genuine rate, there's no realistic Stableford target value that could
+be confused with "not set" here, so null on its own is an unambiguous
+signal and no separate checkbox was needed.
+
+**Independent of the rate-override checkbox (`override_handicap_rates`
+from `0025`)** — an event can set a custom cut target without also
+overriding the course's cut/increase rates, or vice versa, or both
+together. `createScorecard` reads and applies them as two entirely
+separate optional values.
+
+**Scaled proportionally for 9-hole rounds**, same ratio as the
+standard target's own 36→18 scaling — an override of 33, entered at
+the full-18-hole scale an admin actually thinks in, means 16.5 for a
+9-hole round, not a flat 33 applied regardless of round length. Tested
+directly, including the specific case of a 9-hole score that clears
+the scaled standard target (18) but not the scaled override (16.5),
+confirming it still increases normally rather than falling into an
+unintended gap.
+
+**10 new tests**, covering: undefined/null behaving identically to no
+override; cut winning in the gap; increase staying anchored to 36
+regardless of the override; the cut basis itself using the override
+value, not just deciding whether to fire; the exact boundary case at
+the override value; a *raised* override creating a deliberate dead
+zone between 36 and itself where neither cut nor increase fires; a
+raised override still cutting once cleared; a raised override leaving
+increase fully untouched; and both 9-hole scaling cases above.
+
 ## Winner's name on the events list
 
 A confirmed event with a clear winner now shows a third line on
