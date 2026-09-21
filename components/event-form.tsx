@@ -18,6 +18,8 @@ export interface EventFormInitialData {
   handicapCutForWinner: number;
   usesCompetitionHandicapIndex: boolean;
   teeColor: "white" | "yellow";
+  depositGbp: number | null;
+  remainingBalanceGbp: number | null;
 }
 
 interface EventFormProps {
@@ -52,6 +54,12 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     initial?.usesCompetitionHandicapIndex ?? false
   );
   const [teeColor, setTeeColor] = React.useState<"white" | "yellow">(initial?.teeColor ?? "white");
+  const [depositGbp, setDepositGbp] = React.useState(
+    initial?.depositGbp != null ? String(initial.depositGbp) : ""
+  );
+  const [remainingBalanceGbp, setRemainingBalanceGbp] = React.useState(
+    initial?.remainingBalanceGbp != null ? String(initial.remainingBalanceGbp) : ""
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
@@ -73,6 +81,8 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("handicapCutForWinner", handicapCutForWinner);
     formData.set("usesCompetitionHandicapIndex", String(usesCompetitionHandicapIndex));
     formData.set("teeColor", teeColor);
+    formData.set("depositGbp", depositGbp);
+    formData.set("remainingBalanceGbp", remainingBalanceGbp);
 
     const result = await onSubmit(formData);
     if (!result.ok) {
@@ -261,6 +271,40 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           </span>
         </span>
       </label>
+
+      <div className="flex gap-4">
+        <div className="flex-1 space-y-1.5">
+          <Label htmlFor="depositGbp">Deposit (£)</Label>
+          {/* Optional — same text+inputMode=decimal pattern as Course
+              Rating, no digit-only filter since pence need a decimal
+              point. Empty means not set, not £0. */}
+          <Input
+            id="depositGbp"
+            type="text"
+            inputMode="decimal"
+            placeholder="e.g. 10.00"
+            value={depositGbp}
+            onChange={(e) => setDepositGbp(e.target.value)}
+            disabled={pending}
+          />
+        </div>
+        <div className="flex-1 space-y-1.5">
+          <Label htmlFor="remainingBalanceGbp">Remaining balance (£)</Label>
+          <Input
+            id="remainingBalanceGbp"
+            type="text"
+            inputMode="decimal"
+            placeholder="e.g. 25.00"
+            value={remainingBalanceGbp}
+            onChange={(e) => setRemainingBalanceGbp(e.target.value)}
+            disabled={pending}
+          />
+        </div>
+      </div>
+      <p className="-mt-3 text-xs text-muted-foreground">
+        Informational only — shown on the event page and sign-up sheet, not tied to
+        registration or payment tracking.
+      </p>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

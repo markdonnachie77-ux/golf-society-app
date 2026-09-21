@@ -21,6 +21,10 @@ function formatTeeTime(timeStr: string): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+function formatGbp(amount: number): string {
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(amount);
+}
+
 /**
  * GET, not a Server Action — a Server Action can't hand back a binary
  * file for the browser to download the way a Route Handler's Response
@@ -85,6 +89,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       registeredCount={event.registrations.length}
       registeredPlayers={registeredPlayers}
       handicapColumnLabel={handicapColumnLabel}
+      depositGbpFormatted={event.depositGbp !== null ? formatGbp(event.depositGbp) : null}
+      remainingBalanceGbpFormatted={
+        event.remainingBalanceGbp !== null ? formatGbp(event.remainingBalanceGbp) : null
+      }
       qrDataUrl={qrDataUrl}
       signUpUrl={signUpUrl}
     />

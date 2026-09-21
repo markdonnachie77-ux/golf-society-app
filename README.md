@@ -1319,6 +1319,33 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
+## Deposit and remaining balance on events (`0023_event_deposit_balance.sql`)
+
+Two purely informational fields on an event, in GBP — no calculation,
+no payment processing, nothing else in the app reasons about them.
+Shown on the event page (a line under the course/date/tee-time header,
+only appearing when at least one is actually set) and on the sign-up
+PDF (two more rows in the same header block as Course/Date/Format).
+Null means "not tracked", not £0 — same "empty means not set, not
+zero" distinction already established for Course Rating, verified the
+same way (5 cases: null, a valid amount, malformed input, zero,
+negative, all behaving correctly and distinctly).
+
+**Adding two optional PDF header rows meant re-verifying the
+single-page guarantee, not assuming it still held.** This is
+specifically the situation the template's own comments already warn
+about — "if this template's other content changes materially, this
+number should be re-measured, not adjusted by guess." A taller header
+leaves less room for the tables below, and empirical re-testing (the
+same worst-case methodology as the original verification: every player
+registered, zero blank rows, both short and long/wrapping names)
+confirmed it: with both deposit and balance set, 21 total rows fits on
+one page and 22 tips to two — one row tighter than before these fields
+existed. `MAX_TOTAL_ROWS` is now 21, not 22, covering the worst case
+(both fields present) rather than just the common one (neither
+present) — a single ceiling has to be safe regardless of which case a
+particular event happens to be, not just the typical one.
+
 ## Middleware's Supabase fetch had no timeout — real production bug
 
 Found from a live symptom, not proactively: slow button clicks across

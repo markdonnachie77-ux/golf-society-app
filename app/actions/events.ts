@@ -45,7 +45,35 @@ const eventDetailsSchema = z.object({
   teeColor: z.enum(["white", "yellow"], {
     errorMap: () => ({ message: "Select a tee color" }),
   }),
+  // Purely informational — see 0023_event_deposit_balance.sql. Null
+  // means "not set", distinct from £0, so both are nullable with no
+  // default rather than defaulting to 0.
+  depositGbp: z
+    .number({ invalid_type_error: "Deposit must be a number" })
+    .min(0, "Deposit can't be negative")
+    .max(99999.99, "That deposit looks too high")
+    .nullable(),
+  remainingBalanceGbp: z
+    .number({ invalid_type_error: "Remaining balance must be a number" })
+    .min(0, "Remaining balance can't be negative")
+    .max(99999.99, "That balance looks too high")
+    .nullable(),
 });
+
+/**
+ * An empty form field must become null (not set), not 0 — Number("")
+ * evaluates to 0 in JavaScript, which would be indistinguishable from a
+ * genuinely entered £0. Matches the identical helper in
+ * app/actions/courses.ts (parseOptionalNumberField), duplicated here
+ * rather than shared, since there's no existing shared form-parsing
+ * module in this app and introducing one for two call sites isn't
+ * worth the churn.
+ */
+function parseOptionalMoneyField(formData: FormData, key: string): number | null {
+  const raw = String(formData.get(key) ?? "").trim();
+  if (raw === "") return null;
+  return Number(raw);
+}
 
 function parseEventFormData(formData: FormData) {
   return eventDetailsSchema.safeParse({
@@ -59,6 +87,8 @@ function parseEventFormData(formData: FormData) {
     handicapCutForWinner: Number(formData.get("handicapCutForWinner") || 0),
     usesCompetitionHandicapIndex: formData.get("usesCompetitionHandicapIndex") === "true",
     teeColor: String(formData.get("teeColor") ?? "white"),
+    depositGbp: parseOptionalMoneyField(formData, "depositGbp"),
+    remainingBalanceGbp: parseOptionalMoneyField(formData, "remainingBalanceGbp"),
   });
 }
 
@@ -91,6 +121,8 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       handicap_cut_for_winner: data.handicapCutForWinner,
       uses_competition_handicap_index: data.usesCompetitionHandicapIndex,
       tee_color: data.teeColor,
+      deposit_gbp: data.depositGbp,
+      remaining_balance_gbp: data.remainingBalanceGbp,
       status: "draft",
       created_by: session.playerId,
       society_id: societyId,
@@ -143,6 +175,8 @@ export async function updateEvent(eventId: string, formData: FormData): Promise<
       handicap_cut_for_winner: data.handicapCutForWinner,
       uses_competition_handicap_index: data.usesCompetitionHandicapIndex,
       tee_color: data.teeColor,
+      deposit_gbp: data.depositGbp,
+      remaining_balance_gbp: data.remainingBalanceGbp,
       updated_at: new Date().toISOString(),
     })
     .eq("id", eventId)
@@ -316,6 +350,8 @@ export interface EventDetail {
   handicapCutForWinner: number;
   usesCompetitionHandicapIndex: boolean;
   teeColor: TeeColor;
+  depositGbp: number | null;
+  remainingBalanceGbp: number | null;
   leaderboardConfirmedAt: string | null;
   winnerPlayerId: string | null;
   winnerPlayerName: string | null;
@@ -350,7 +386,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const { data: event, error } = await supabase
     .from("events")
     .select(
-      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
+      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, deposit_gbp, remaining_balance_gbp, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
     )
     .eq("id", eventId)
     .eq("society_id", societyId)
@@ -411,6 +447,8 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
     handicapCutForWinner: event.handicap_cut_for_winner,
     usesCompetitionHandicapIndex: event.uses_competition_handicap_index,
     teeColor: event.tee_color,
+    depositGbp: event.deposit_gbp,
+    remainingBalanceGbp: event.remaining_balance_gbp,
     leaderboardConfirmedAt: event.leaderboard_confirmed_at,
     winnerPlayerId: event.winner_player_id,
     winnerPlayerName: winner ? `${winner.first_name} ${winner.last_name}` : null,

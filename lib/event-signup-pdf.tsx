@@ -98,15 +98,25 @@ function computeRowSizing(totalRows: number): RowSizing {
 // means the "always fits on one page" guarantee has its own ceiling —
 // past a certain total, even minimum-height rows don't fit. Empirically
 // measured against the ACTUAL scaling implementation above (not derived
-// by calculation): 22 total rows fits on one page in every case tested
-// (short names, long/wrapping names, all-registered/zero-blank), 23
+// by calculation): 21 total rows fits on one page in every case tested
+// (short names, long/wrapping names, all-registered/zero-blank), 22
 // tips to a second page in every case. A genuinely extreme capacity (the
 // app allows up to 500) still gets a hard ceiling here — blank rows give
 // way first when the total would exceed this, since already-registered
 // names always all get shown. If this template's other content changes
 // materially, this number should be re-measured the same way, not
 // adjusted by guess.
-const MAX_TOTAL_ROWS = 22;
+//
+// Was 22 before the optional deposit/balance header rows were added —
+// re-measured (not adjusted by estimate) once those rows existed, since
+// they reduce the space available to the tables below whenever an event
+// has both set: 22 total rows, which fit safely before, tips to a
+// second page once that header grows by its full two extra lines. 21 is
+// the new, correct ceiling that holds in every case, including the
+// still-common case of an event with neither field set — the ceiling
+// has to cover the worst case regardless of whether any specific event
+// happens to use these fields, not just the common one.
+const MAX_TOTAL_ROWS = 21;
 
 export interface EventSignUpPdfProps {
   eventName: string;
@@ -118,6 +128,8 @@ export interface EventSignUpPdfProps {
   registeredCount: number;
   registeredPlayers: { name: string; handicapDisplay: string }[];
   handicapColumnLabel: string;
+  depositGbpFormatted: string | null;
+  remainingBalanceGbpFormatted: string | null;
   qrDataUrl: string;
   signUpUrl: string;
 }
@@ -140,6 +152,8 @@ export function EventSignUpPdf({
   registeredCount,
   registeredPlayers,
   handicapColumnLabel,
+  depositGbpFormatted,
+  remainingBalanceGbpFormatted,
   qrDataUrl,
   signUpUrl,
 }: EventSignUpPdfProps) {
@@ -193,6 +207,18 @@ export function EventSignUpPdf({
                 {registeredCount} / {capacity} filled
               </Text>
             </View>
+            {depositGbpFormatted !== null && (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Deposit</Text>
+                <Text style={styles.detailValue}>{depositGbpFormatted}</Text>
+              </View>
+            )}
+            {remainingBalanceGbpFormatted !== null && (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Balance</Text>
+                <Text style={styles.detailValue}>{remainingBalanceGbpFormatted}</Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.qrBlock}>

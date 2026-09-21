@@ -33,6 +33,10 @@ function formatTeeTime(timeStr: string): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+function formatGbp(amount: number): string {
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(amount);
+}
+
 export default async function EventDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   const { id } = await params;
@@ -77,6 +81,15 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
             {event.courseName} · {formatEventDate(event.eventDate)} · First tee{" "}
             {formatTeeTime(event.firstTeeTime)}
           </p>
+          {(event.depositGbp !== null || event.remainingBalanceGbp !== null) && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {event.depositGbp !== null && <>Deposit {formatGbp(event.depositGbp)}</>}
+              {event.depositGbp !== null && event.remainingBalanceGbp !== null && " · "}
+              {event.remainingBalanceGbp !== null && (
+                <>Remaining balance {formatGbp(event.remainingBalanceGbp)}</>
+              )}
+            </p>
+          )}
         </div>
 
         {isAdmin && (

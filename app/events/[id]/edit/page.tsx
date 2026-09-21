@@ -48,6 +48,8 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
                 handicapCutForWinner: event.handicapCutForWinner,
                 usesCompetitionHandicapIndex: event.usesCompetitionHandicapIndex,
                 teeColor: event.teeColor,
+                depositGbp: event.depositGbp,
+                remainingBalanceGbp: event.remainingBalanceGbp,
               }}
               courses={courses}
             />
