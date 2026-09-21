@@ -1319,6 +1319,25 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
+## Winner's name on the events list
+
+A confirmed event with a clear winner now shows a third line on
+`/events` — 🏆 followed by their name, right under the course/date
+line, matching the same trophy-emoji style already used on the event
+detail page's own leaderboard card. Reuses `winner_player_id` exactly
+as `getEventDetail` already does (same qualified foreign-key embed,
+`players!events_winner_player_id_fkey`, needed because
+`event_registrations` has two separate foreign keys to `players` and
+an unqualified embed would be ambiguous) — no new calculation, no
+second source of truth for who won.
+
+**Shows nothing extra for a tie or an unconfirmed event** — both cases
+already produce `winner_player_id: null` (confirmed leaderboards
+either have a clear winner or don't, per the tie-handling decision from
+the original confirm-leaderboard feature), so the line simply doesn't
+render rather than needing its own separate "no winner" case to
+handle.
+
 ## Per-event handicap cut/increase rate override (`0025_event_handicap_override_checkbox.sql`)
 
 Two event fields mirroring `courses.handicap_cut_per_point` /

@@ -33,6 +33,9 @@ function EventRow({ event }: { event: Awaited<ReturnType<typeof listEvents>>[num
         <p className="text-sm text-muted-foreground">
           {event.course_name} · {formatEventDate(event.event_date)}
         </p>
+        {event.winner_player_name && (
+          <p className="text-sm text-muted-foreground">🏆 {event.winner_player_name}</p>
+        )}
       </div>
       <span className="font-numeral text-sm text-muted-foreground">
         {event.registered_count}/{event.capacity}

@@ -324,6 +324,7 @@ export interface EventListRow {
   status: EventStatus;
   course_name: string;
   registered_count: number;
+  winner_player_name: string | null;
 }
 
 /**
@@ -340,7 +341,9 @@ export async function listEvents(): Promise<EventListRow[]> {
 
   let query = supabase
     .from("events")
-    .select("id, name, event_date, first_tee_time, capacity, status, courses(name)")
+    .select(
+      "id, name, event_date, first_tee_time, capacity, status, courses(name), winner:players!events_winner_player_id_fkey(first_name, last_name)"
+    )
     .eq("society_id", societyId);
 
   if (session.role !== "admin") {
@@ -359,6 +362,7 @@ export async function listEvents(): Promise<EventListRow[]> {
     capacity: number;
     status: EventStatus;
     courses: { name: string } | null;
+    winner: { first_name: string; last_name: string } | null;
   }
   const rows = data as unknown as RawRow[];
   const eventIds = rows.map((r) => r.id);
@@ -389,6 +393,7 @@ export async function listEvents(): Promise<EventListRow[]> {
     status: row.status,
     course_name: row.courses?.name ?? "Unknown course",
     registered_count: counts.get(row.id) ?? 0,
+    winner_player_name: row.winner ? `${row.winner.first_name} ${row.winner.last_name}` : null,
   }));
 }
 
