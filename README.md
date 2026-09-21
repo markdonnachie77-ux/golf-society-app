@@ -1319,40 +1319,63 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
-## Per-event handicap cut/increase rate override (`0024_event_handicap_rate_override.sql`)
+## Per-event handicap cut/increase rate override (`0025_event_handicap_override_checkbox.sql`)
 
-Two more event fields, mirroring `courses.handicap_cut_per_point` /
-`handicap_increase_per_point` exactly (same 0–9.99 range) — but with a
-deliberately different meaning for zero. At the course level, 0 is a
-genuine, meaningful rate (the form's own helper text: "Set to 0 for a
-buffered zone"). At the event level, per an explicit design decision
-confirmed directly with the user rather than inferred, 0 means
-something else entirely: "no override — use the course's own rate for
-rounds tied to this event." Only a genuinely nonzero value overrides
-anything. This is a real, accepted limitation, not an oversight: an
-event cannot override a course's nonzero rate down to exactly 0,
-because 0 is reserved to mean "not overriding."
+Two event fields mirroring `courses.handicap_cut_per_point` /
+`handicap_increase_per_point` exactly (same 0–9.99 range), gated by an
+explicit "Override handicap cut/increase rates for this event"
+checkbox — not the 0-means-fallback scheme an earlier version of this
+feature used. That's a real, deliberate revision, not a typo: the
+first version worked, but the user caught a genuine limitation in it
+after reflecting on the delivered feature — a course's nonzero rate
+could never be overridden down to exactly 0, so there was no way to
+disable handicap adjustment entirely for something like a fun day
+event. An explicit boolean removes the ambiguity instead of working
+around it: unchecked, the course's rate always applies regardless of
+whatever the two rate columns contain; checked, both rate fields
+appear and become mandatory, and a genuine 0 is accepted and used
+exactly as typed.
 
-**The two rates are independent overrides, not a linked pair.** An
+**Migrating off the old scheme preserved existing data's intent,
+rather than silently discarding it.** Any event that had already set a
+genuine nonzero override under the 0024 scheme gets
+`override_handicap_rates` set to `true` in the same migration that
+adds the column, so it keeps overriding under the new scheme instead
+of reverting to the course's rate. The rate columns themselves become
+nullable at the same time — null now means "not overriding," matching
+this app's established convention for optional fields (Course Rating,
+deposit, balance) now that the boolean is the actual source of truth,
+rather than a stored 0 that no longer carries any meaning on its own.
+Confirmed directly against PostgreSQL's own documentation before
+relying on it: a check constraint is satisfied by a null operand, not
+violated by one, so the existing 0–9.99 constraints on both columns
+needed no changes to permit null.
+
+**Mandatory validation is enforced with zod's `.superRefine()`**,
+chained onto `eventDetailsSchema` — when the checkbox is on, both rate
+fields must be non-null or the request is rejected with a field-specific
+error (mapped by `path`, so it shows up attached to the right input,
+not a generic form-level message). Verified this directly against 5
+cases before wiring it into the form, including the one that's the
+whole point of this revision: a genuine `0` submitted with the checkbox
+on is accepted as valid, correctly distinguished from the field being
+left empty.
+
+**The two rates remain independent overrides, not a linked pair** — an
 event can override just the cut rate while the increase rate still
-falls through to the course's own value, or vice versa, or both, or
-neither. Verified this specifically — the case most likely to be
-gotten wrong by treating them as one setting instead of two — along
-with the ordinary no-override and both-overridden cases, and the edge
-case where the course's own rate happens to already be 0 and the event
-doesn't override (result should be genuinely 0, not confused with "no
-override signal").
+comes from the course, or the reverse, or both, or neither (by leaving
+the checkbox off entirely). This was verified for the original 0024
+scheme and re-verified here, since the underlying independence didn't
+change, only how "not overriding" gets signaled.
 
-**`proposedHandicapChange` itself needed no changes at all.** It's
-always taken a plain `{ handicapCutPerPoint, handicapIncreasePerPoint }`
-object as input, agnostic to where those numbers come from — so the
-override logic lives entirely in `createScorecard`, the one caller that
-actually has both the course's and the event's rates in hand. Two
-`number | null` variables, set only when the linked event's rate is
-genuinely nonzero, resolved with `??` against the course's own rate
-immediately before the `proposedHandicapChange` call — the smallest
-possible change that could implement this, rather than threading an
-override concept through the calculation function itself.
+**`proposedHandicapChange` still needed no changes** — it's always
+taken a plain `{ handicapCutPerPoint, handicapIncreasePerPoint }`
+object as input, agnostic to where the numbers come from. The override
+logic lives entirely in `createScorecard`: two `number | null`
+variables, set only when `event.override_handicap_rates` is true, `??`
+against the course's own rate immediately before the calculation call.
+Genuinely nothing else in this app needed to know the override scheme
+changed underneath it.
 
 ## Deposit and remaining balance on events (`0023_event_deposit_balance.sql`)
 

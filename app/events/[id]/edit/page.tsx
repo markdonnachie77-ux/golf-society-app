@@ -50,6 +50,7 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
                 teeColor: event.teeColor,
                 depositGbp: event.depositGbp,
                 remainingBalanceGbp: event.remainingBalanceGbp,
+                overrideHandicapRates: event.overrideHandicapRates,
                 handicapCutPerPointOverride: event.handicapCutPerPointOverride,
                 handicapIncreasePerPointOverride: event.handicapIncreasePerPointOverride,
               }}

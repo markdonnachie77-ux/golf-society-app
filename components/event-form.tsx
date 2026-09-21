@@ -20,8 +20,9 @@ export interface EventFormInitialData {
   teeColor: "white" | "yellow";
   depositGbp: number | null;
   remainingBalanceGbp: number | null;
-  handicapCutPerPointOverride: number;
-  handicapIncreasePerPointOverride: number;
+  overrideHandicapRates: boolean;
+  handicapCutPerPointOverride: number | null;
+  handicapIncreasePerPointOverride: number | null;
 }
 
 interface EventFormProps {
@@ -62,11 +63,16 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
   const [remainingBalanceGbp, setRemainingBalanceGbp] = React.useState(
     initial?.remainingBalanceGbp != null ? String(initial.remainingBalanceGbp) : ""
   );
+  const [overrideHandicapRates, setOverrideHandicapRates] = React.useState(
+    initial?.overrideHandicapRates ?? false
+  );
   const [handicapCutPerPointOverride, setHandicapCutPerPointOverride] = React.useState(
-    String(initial?.handicapCutPerPointOverride ?? "0")
+    initial?.handicapCutPerPointOverride != null ? String(initial.handicapCutPerPointOverride) : ""
   );
   const [handicapIncreasePerPointOverride, setHandicapIncreasePerPointOverride] = React.useState(
-    String(initial?.handicapIncreasePerPointOverride ?? "0")
+    initial?.handicapIncreasePerPointOverride != null
+      ? String(initial.handicapIncreasePerPointOverride)
+      : ""
   );
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
@@ -91,6 +97,7 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("teeColor", teeColor);
     formData.set("depositGbp", depositGbp);
     formData.set("remainingBalanceGbp", remainingBalanceGbp);
+    formData.set("overrideHandicapRates", String(overrideHandicapRates));
     formData.set("handicapCutPerPointOverride", handicapCutPerPointOverride);
     formData.set("handicapIncreasePerPointOverride", handicapIncreasePerPointOverride);
 
@@ -316,59 +323,76 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
         registration or payment tracking.
       </p>
 
-      <div className="grid gap-5 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="handicapCutPerPointOverride">
-            Handicap cut rate override (per point over target)
-          </Label>
-          {/* Same text+inputMode=decimal pattern as the course-level
-              cutRate field in CourseForm. Unlike that field, 0 here
-              doesn't mean "a buffered zone" — it means "no override,
-              use the course's own rate for rounds tied to this
-              event". Confirmed directly with the user as the intended
-              design: an event genuinely cannot override to exactly 0
-              if the course's rate is nonzero. */}
-          <Input
-            id="handicapCutPerPointOverride"
-            type="text"
-            inputMode="decimal"
-            value={handicapCutPerPointOverride}
-            onChange={(e) => setHandicapCutPerPointOverride(e.target.value)}
-            disabled={pending}
-            required
-          />
-          <p className="text-xs text-muted-foreground">
-            0 = use the course&apos;s own rate. Nonzero overrides it for rounds tied to this
-            event.
-          </p>
-          {fieldErrors.handicapCutPerPointOverride && (
-            <p className="text-sm text-destructive">{fieldErrors.handicapCutPerPointOverride}</p>
-          )}
+      <label className="flex items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={overrideHandicapRates}
+          onChange={(e) => setOverrideHandicapRates(e.target.checked)}
+          disabled={pending}
+          className="mt-1 h-4 w-4 shrink-0 rounded border-input"
+        />
+        <span className="text-sm">
+          <span className="font-medium">Override handicap cut/increase rates for this event</span>
+          <br />
+          <span className="text-muted-foreground">
+            Leave off to always use the course&apos;s own rates. Turn on for something like a fun
+            day where no handicap adjustment — or a different rate entirely — should apply.
+          </span>
+        </span>
+      </label>
+
+      {overrideHandicapRates && (
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="handicapCutPerPointOverride">
+              Handicap cut rate (per point over target)
+            </Label>
+            {/* Same text+inputMode=decimal pattern as the course-level
+                cutRate field in CourseForm — but unlike that field,
+                these only exist at all once the checkbox above is
+                checked, so there's no "0 means something different
+                than it looks like" ambiguity: a genuine 0 here means
+                no cut at all for this event, exactly as typed. Both
+                fields are mandatory the moment the checkbox is
+                checked (required below, plus server-side validation
+                in eventDetailsSchema's superRefine) — an admin
+                turning the override on has to make a deliberate
+                choice for both rates, not leave one at a stale or
+                default value. */}
+            <Input
+              id="handicapCutPerPointOverride"
+              type="text"
+              inputMode="decimal"
+              value={handicapCutPerPointOverride}
+              onChange={(e) => setHandicapCutPerPointOverride(e.target.value)}
+              disabled={pending}
+              required
+            />
+            {fieldErrors.handicapCutPerPointOverride && (
+              <p className="text-sm text-destructive">{fieldErrors.handicapCutPerPointOverride}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="handicapIncreasePerPointOverride">
+              Handicap increase rate (per point under target)
+            </Label>
+            <Input
+              id="handicapIncreasePerPointOverride"
+              type="text"
+              inputMode="decimal"
+              value={handicapIncreasePerPointOverride}
+              onChange={(e) => setHandicapIncreasePerPointOverride(e.target.value)}
+              disabled={pending}
+              required
+            />
+            {fieldErrors.handicapIncreasePerPointOverride && (
+              <p className="text-sm text-destructive">
+                {fieldErrors.handicapIncreasePerPointOverride}
+              </p>
+            )}
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="handicapIncreasePerPointOverride">
-            Handicap increase rate override (per point under target)
-          </Label>
-          <Input
-            id="handicapIncreasePerPointOverride"
-            type="text"
-            inputMode="decimal"
-            value={handicapIncreasePerPointOverride}
-            onChange={(e) => setHandicapIncreasePerPointOverride(e.target.value)}
-            disabled={pending}
-            required
-          />
-          <p className="text-xs text-muted-foreground">
-            0 = use the course&apos;s own rate. Nonzero overrides it for rounds tied to this
-            event.
-          </p>
-          {fieldErrors.handicapIncreasePerPointOverride && (
-            <p className="text-sm text-destructive">
-              {fieldErrors.handicapIncreasePerPointOverride}
-            </p>
-          )}
-        </div>
-      </div>
+      )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

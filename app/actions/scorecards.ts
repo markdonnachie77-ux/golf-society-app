@@ -172,7 +172,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     const { data: event } = await supabase
       .from("events")
       .select(
-        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, handicap_cut_per_point, handicap_increase_per_point, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
+        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
       )
       .eq("id", eventIdRaw)
       .eq("society_id", societyId)
@@ -201,16 +201,22 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     }
 
     // Per-event override of the course's own handicap cut/increase
-    // rates — confirmed directly with the user: 0 (the column's own
-    // default) means "use the course's rate", not "override to zero",
-    // so only a genuinely non-zero value here actually overrides
-    // anything. Independent of the Competition Handicap Index logic
-    // below — an event can override these rates whether or not it also
-    // uses Competition Handicap Index.
-    if (event.handicap_cut_per_point !== 0) {
+    // rates, gated on the explicit override_handicap_rates flag rather
+    // than a "nonzero means override" sentinel (an earlier version of
+    // this feature used that scheme; confirmed directly with the user
+    // to replace it, since it meant an event could never override a
+    // course's nonzero rate down to exactly 0 — a real limitation, no
+    // way to disable handicap adjustment entirely for a "fun day"
+    // event). When the flag is true, both rates are guaranteed non-null
+    // by the form's own mandatory validation (see eventDetailsSchema's
+    // superRefine in app/actions/events.ts) — the `?? course...`
+    // fallback below is defensive only, for the case those columns
+    // were somehow null despite the flag being true, not the expected
+    // path. Independent of the Competition Handicap Index logic below —
+    // an event can override these rates whether or not it also uses
+    // Competition Handicap Index.
+    if (event.override_handicap_rates) {
       cutPerPointOverride = event.handicap_cut_per_point;
-    }
-    if (event.handicap_increase_per_point !== 0) {
       increasePerPointOverride = event.handicap_increase_per_point;
     }
 

@@ -58,31 +58,60 @@ const eventDetailsSchema = z.object({
     .min(0, "Remaining balance can't be negative")
     .max(99999.99, "That balance looks too high")
     .nullable(),
-  // Per-event override of the course's own cut/increase rates — 0
-  // (the default) means "use the course's rate", not "override to
-  // zero"; confirmed directly with the user as the intended design,
-  // not the "null means not set" convention used for depositGbp above.
-  // Same 0-9.99 range as the course-level fields, for consistency.
+  // Per-event override of the course's own cut/increase rates,
+  // confirmed directly with the user as a real design change from an
+  // earlier version of this feature: that version used 0 as a
+  // "fall back to the course" sentinel, which meant an event could
+  // never override a course's nonzero rate down to exactly 0 — a real
+  // limitation (no way to disable handicap adjustment entirely for a
+  // "fun day" event). An explicit boolean removes the ambiguity
+  // instead of working around it: overrideHandicapRates false means
+  // the course's rate always applies, full stop, regardless of
+  // whatever these two fields contain; true means both become
+  // mandatory (see the .superRefine below) and are used as-is,
+  // including a genuine 0.
+  overrideHandicapRates: z.boolean(),
   handicapCutPerPointOverride: z
     .number({ invalid_type_error: "Cut rate must be a number" })
     .min(0, "Cut rate can't be negative")
-    .max(9.99, "Cut rate looks too high"),
+    .max(9.99, "Cut rate looks too high")
+    .nullable(),
   handicapIncreasePerPointOverride: z
     .number({ invalid_type_error: "Increase rate must be a number" })
     .min(0, "Increase rate can't be negative")
-    .max(9.99, "Increase rate looks too high"),
+    .max(9.99, "Increase rate looks too high")
+    .nullable(),
+}).superRefine((data, ctx) => {
+  if (data.overrideHandicapRates) {
+    if (data.handicapCutPerPointOverride === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["handicapCutPerPointOverride"],
+        message: "Required when overriding the course's rates",
+      });
+    }
+    if (data.handicapIncreasePerPointOverride === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["handicapIncreasePerPointOverride"],
+        message: "Required when overriding the course's rates",
+      });
+    }
+  }
 });
 
 /**
  * An empty form field must become null (not set), not 0 — Number("")
  * evaluates to 0 in JavaScript, which would be indistinguishable from a
- * genuinely entered £0. Matches the identical helper in
+ * genuinely entered value of 0 (a £0 deposit, or — since this helper is
+ * also used for the handicap rate override fields — a genuine,
+ * deliberate 0 override rate). Matches the identical helper in
  * app/actions/courses.ts (parseOptionalNumberField), duplicated here
  * rather than shared, since there's no existing shared form-parsing
- * module in this app and introducing one for two call sites isn't
- * worth the churn.
+ * module in this app and introducing one for a handful of call sites
+ * isn't worth the churn.
  */
-function parseOptionalMoneyField(formData: FormData, key: string): number | null {
+function parseOptionalNumberField(formData: FormData, key: string): number | null {
   const raw = String(formData.get(key) ?? "").trim();
   if (raw === "") return null;
   return Number(raw);
@@ -100,10 +129,14 @@ function parseEventFormData(formData: FormData) {
     handicapCutForWinner: Number(formData.get("handicapCutForWinner") || 0),
     usesCompetitionHandicapIndex: formData.get("usesCompetitionHandicapIndex") === "true",
     teeColor: String(formData.get("teeColor") ?? "white"),
-    depositGbp: parseOptionalMoneyField(formData, "depositGbp"),
-    remainingBalanceGbp: parseOptionalMoneyField(formData, "remainingBalanceGbp"),
-    handicapCutPerPointOverride: Number(formData.get("handicapCutPerPointOverride") || 0),
-    handicapIncreasePerPointOverride: Number(formData.get("handicapIncreasePerPointOverride") || 0),
+    depositGbp: parseOptionalNumberField(formData, "depositGbp"),
+    remainingBalanceGbp: parseOptionalNumberField(formData, "remainingBalanceGbp"),
+    overrideHandicapRates: formData.get("overrideHandicapRates") === "true",
+    handicapCutPerPointOverride: parseOptionalNumberField(formData, "handicapCutPerPointOverride"),
+    handicapIncreasePerPointOverride: parseOptionalNumberField(
+      formData,
+      "handicapIncreasePerPointOverride"
+    ),
   });
 }
 
@@ -138,6 +171,7 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       tee_color: data.teeColor,
       deposit_gbp: data.depositGbp,
       remaining_balance_gbp: data.remainingBalanceGbp,
+      override_handicap_rates: data.overrideHandicapRates,
       handicap_cut_per_point: data.handicapCutPerPointOverride,
       handicap_increase_per_point: data.handicapIncreasePerPointOverride,
       status: "draft",
@@ -194,6 +228,7 @@ export async function updateEvent(eventId: string, formData: FormData): Promise<
       tee_color: data.teeColor,
       deposit_gbp: data.depositGbp,
       remaining_balance_gbp: data.remainingBalanceGbp,
+      override_handicap_rates: data.overrideHandicapRates,
       handicap_cut_per_point: data.handicapCutPerPointOverride,
       handicap_increase_per_point: data.handicapIncreasePerPointOverride,
       updated_at: new Date().toISOString(),
@@ -371,8 +406,9 @@ export interface EventDetail {
   teeColor: TeeColor;
   depositGbp: number | null;
   remainingBalanceGbp: number | null;
-  handicapCutPerPointOverride: number;
-  handicapIncreasePerPointOverride: number;
+  overrideHandicapRates: boolean;
+  handicapCutPerPointOverride: number | null;
+  handicapIncreasePerPointOverride: number | null;
   leaderboardConfirmedAt: string | null;
   winnerPlayerId: string | null;
   winnerPlayerName: string | null;
@@ -407,7 +443,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const { data: event, error } = await supabase
     .from("events")
     .select(
-      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, deposit_gbp, remaining_balance_gbp, handicap_cut_per_point, handicap_increase_per_point, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
+      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, deposit_gbp, remaining_balance_gbp, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
     )
     .eq("id", eventId)
     .eq("society_id", societyId)
@@ -470,6 +506,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
     teeColor: event.tee_color,
     depositGbp: event.deposit_gbp,
     remainingBalanceGbp: event.remaining_balance_gbp,
+    overrideHandicapRates: event.override_handicap_rates,
     handicapCutPerPointOverride: event.handicap_cut_per_point,
     handicapIncreasePerPointOverride: event.handicap_increase_per_point,
     leaderboardConfirmedAt: event.leaderboard_confirmed_at,
