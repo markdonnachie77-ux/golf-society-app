@@ -3,6 +3,6 @@
 import { EventForm } from "@/components/event-form";
 import { createEvent } from "@/app/actions/events";
 
-export function NewEventForm({ courses }: { courses: { id: string; name: string }[] }) {
+export function NewEventForm({ courses }: { courses: { id: string; name: string; hole_count: number }[] }) {
   return <EventForm courses={courses} onSubmit={createEvent} submitLabel="Create draft" />;
 }

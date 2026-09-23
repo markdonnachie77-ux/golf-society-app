@@ -29,7 +29,7 @@ export interface EventFormInitialData {
 
 interface EventFormProps {
   initial?: EventFormInitialData;
-  courses: { id: string; name: string }[];
+  courses: { id: string; name: string; hole_count: number }[];
   onSubmit: (formData: FormData) => Promise<ActionResult>;
   submitLabel: string;
 }
@@ -85,6 +85,14 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
+
+  // Both cutTargetOverride and increaseThresholdOverride are always
+  // entered/stored at the full-18-hole scale, scaled proportionally at
+  // calculation time for 9-hole rounds (lib/golf-math.ts) — surfaced
+  // here so their helper text can show the actual effective value for
+  // whichever course is currently selected, same reasoning as the
+  // course form's own increaseThreshold field.
+  const selectedCourseHoleCount = courses.find((c) => c.id === courseId)?.hole_count;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -424,6 +432,15 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           below for that). If you lower this below 36, any score above it is cut instead of
           increased — for example, with 33 set, a score of 34 is cut, not increased, even
           though 34 is below 36.
+          {selectedCourseHoleCount === 9 &&
+            Number.isFinite(Number(cutTargetOverride)) &&
+            cutTargetOverride !== "" && (
+              <>
+                {" "}
+                For this 9-hole course, that&apos;s an effective target of{" "}
+                {Number(cutTargetOverride) / 2}.
+              </>
+            )}
         </p>
         {fieldErrors.cutTargetOverride && (
           <p className="text-sm text-destructive">{fieldErrors.cutTargetOverride}</p>
@@ -450,6 +467,15 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           handicap to increase at all — scores at or above it get NO increase, not a smaller
           one. For example, with 20 set, a score of 30 gets no increase at all, even though
           it&apos;s well below the standard 36.
+          {selectedCourseHoleCount === 9 &&
+            Number.isFinite(Number(increaseThresholdOverride)) &&
+            increaseThresholdOverride !== "" && (
+              <>
+                {" "}
+                For this 9-hole course, that&apos;s an effective threshold of{" "}
+                {Number(increaseThresholdOverride) / 2}.
+              </>
+            )}
         </p>
         {fieldErrors.increaseThresholdOverride && (
           <p className="text-sm text-destructive">{fieldErrors.increaseThresholdOverride}</p>

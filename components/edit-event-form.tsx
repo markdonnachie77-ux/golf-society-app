@@ -10,7 +10,7 @@ export function EditEventForm({
 }: {
   eventId: string;
   initial: EventFormInitialData;
-  courses: { id: string; name: string }[];
+  courses: { id: string; name: string; hole_count: number }[];
 }) {
   return (
     <EventForm

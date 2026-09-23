@@ -1319,6 +1319,27 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
+## Increase/cut threshold fields now show their effective 9-hole value
+
+Small UX gap the user caught directly from a screenshot of a 9-hole
+course's settings: these fields are always entered/stored at the
+full-18-hole scale, but a 9-hole course's own settings page just
+showed "36" with no indication that the number actually compared
+against a 9-hole score is half that. All three fields — the course
+form's `increaseThreshold`, and the event form's `cutTargetOverride`
+and `increaseThresholdOverride` — now show the actual scaled value
+dynamically underneath, computed from whatever's currently typed, not
+a static "36→18" note.
+
+**The event form's version needed threading real data through three
+components**, not just adding a note — `EventForm`'s own `courses`
+prop never exposed `hole_count` even though `listCoursesForRound`
+already selects it, so the two wrapper components between the event
+pages and `EventForm` (`NewEventForm`, `EditEventForm`) needed their
+own prop types widened too before the data could reach where the note
+is rendered. No new query anywhere — the underlying data was already
+being fetched, just never exposed through the type.
+
 ## Increase threshold: course-level default, event-level override (`0027_increase_threshold.sql`)
 
 Addresses a real problem from actual use: a very low, possibly

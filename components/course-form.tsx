@@ -168,7 +168,13 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
         {/* Same text+inputMode=decimal pattern as cutRate/increaseRate
             above. A score must be BELOW this for the increase rate to
             apply at all — scores at or above it get no increase, not a
-            smaller one. Defaults to 36 (today's standard target). */}
+            smaller one. Defaults to 36 (today's standard target).
+            Always entered/stored at the full-18-hole scale — scaled
+            proportionally at calculation time for 9-hole rounds (see
+            lib/golf-math.ts). Shown dynamically below when holeCount is
+            9, since "36" on a 9-hole course's own settings page reads
+            as confusing/wrong without it — the number typed here is
+            never what actually gets compared against a 9-hole score. */}
         <Input
           id="increaseThreshold"
           type="text"
@@ -181,6 +187,13 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
           Standard is 36. Lowering this means a bad round (e.g. 30 points) may no longer
           increase a handicap at all — only scores below this threshold do, and only by the
           gap to the threshold itself, not to 36. Can be overridden per event.
+          {holeCount === 9 && Number.isFinite(Number(increaseThreshold)) && (
+            <>
+              {" "}
+              For this 9-hole course, that&apos;s an effective threshold of{" "}
+              {Number(increaseThreshold) / 2}.
+            </>
+          )}
         </p>
       </div>
 
