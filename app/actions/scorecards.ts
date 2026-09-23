@@ -170,6 +170,15 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   // cutTargetOverride parameter, which is where the actual "cut wins in
   // the gap, increase stays anchored to standard" logic lives.
   let cutTargetOverride: number | null = null;
+  // Same shape as cutTargetOverride, entirely independent of it — an
+  // event overriding the increase threshold has no bearing on the cut
+  // side, and vice versa (see proposedHandicapChange's own doc comment
+  // in lib/golf-math.ts for the full reasoning). Unlike cutTargetOverride,
+  // null here does NOT mean "use the standard 36/18" directly — it means
+  // "use the course's own increase_threshold value", which itself
+  // defaults to 36 at the database level, so the end result for an
+  // untouched course is identical either way.
+  let increaseTargetOverride: number | null = null;
 
   if (eventIdRaw) {
     if (!z.string().uuid().safeParse(eventIdRaw).success) {
@@ -179,7 +188,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     const { data: event } = await supabase
       .from("events")
       .select(
-        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, cut_target_override, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
+        "id, course_id, event_date, status, uses_competition_handicap_index, tee_color, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, cut_target_override, increase_threshold_override, courses(white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating)"
       )
       .eq("id", eventIdRaw)
       .eq("society_id", societyId)
@@ -230,6 +239,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
     // event has one, regardless of whether the rate-override checkbox
     // is also on.
     cutTargetOverride = event.cut_target_override;
+    increaseTargetOverride = event.increase_threshold_override;
 
     // Confirmed directly with the user: an event using Competition
     // Handicap Index requires the round's own tee to match the event's
@@ -293,7 +303,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   // use their rates/hole layout."
   const { data: course, error: courseError } = await supabase
     .from("courses")
-    .select("id, hole_count, handicap_cut_per_point, handicap_increase_per_point")
+    .select("id, hole_count, handicap_cut_per_point, handicap_increase_per_point, increase_threshold")
     .eq("id", courseId)
     .eq("society_id", societyId)
     .single();
@@ -342,6 +352,11 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   });
 
   const { holeResults, summary } = computeRound(holeInputs, playingHandicap, roundType);
+  // increaseTargetOverride is null unless an event explicitly set one —
+  // course.increase_threshold always has a concrete value (defaults to
+  // 36 at the database level for every course), so this resolution
+  // always lands on a real number either way, never silently falling
+  // through further than the course's own setting.
   const change = proposedHandicapChange(
     summary.totalStablefordPoints,
     roundType,
@@ -349,7 +364,8 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
       handicapCutPerPoint: cutPerPointOverride ?? course.handicap_cut_per_point,
       handicapIncreasePerPoint: increasePerPointOverride ?? course.handicap_increase_per_point,
     },
-    cutTargetOverride
+    cutTargetOverride,
+    increaseTargetOverride ?? course.increase_threshold
   );
 
   const { data: scorecard, error: scorecardError } = await supabase

@@ -1319,6 +1319,70 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
+## Increase threshold: course-level default, event-level override (`0027_increase_threshold.sql`)
+
+Addresses a real problem from actual use: a very low, possibly
+deliberate Stableford score (the user's own example: 9 points)
+increased a handicap by the full gap to the standard 36 target — a
+large, exploitable jump. `courses.increase_threshold` (defaults to 36,
+every existing course unaffected until touched) and
+`events.increase_threshold_override` (nullable, no checkbox needed,
+same reasoning as `cut_target_override`) let an admin lower — or
+raise — the score a round must be below before the increase rate
+applies at all.
+
+**GATE, not a cap — confirmed directly with the user via a concrete
+before/after example**, the same way cutTargetOverride's own
+ambiguity got resolved earlier: once set below 36, a score *above* the
+new threshold gets NO increase at all, not a smaller one. Threshold 20
+means a 30-point round (mediocre, not extreme) no longer increases a
+handicap at all, where it used to increase a little. This is the
+explicitly confirmed, intended behavior — the whole point is to stop
+extreme low scores from producing disproportionate jumps, and a cap
+that still gave partial credit for merely-mediocre rounds wouldn't
+have addressed the actual complaint about scores that "appear to be
+on purpose."
+
+**Entirely independent of `cutTargetOverride` (0026)** — neither
+setting's presence or absence affects the other. `proposedHandicapChange`
+still checks the cut side first (using its own possibly-overridden
+target) and only runs the increase check, using its own separately-
+overridden target, when the cut check doesn't fire. Verified this
+composition directly, not assumed from each feature's own tests in
+isolation: setting both a lowered cut target and a lowered increase
+threshold together, confirming each score lands in the right bucket
+(cut, increase, or neither) based on its own relevant threshold only.
+
+**A genuinely non-obvious interaction was found by a failing test, not
+assumed away**: raising the increase threshold *above* 36 has no
+effect on any score unless the cut target is *also* raised to match —
+because the cut check runs first at the standard 36 (when
+`cutTargetOverride` isn't also set), it intercepts every score above
+36 before the increase check, using the raised threshold, ever gets a
+chance to run. The first version of this test asserted the wrong
+number; the test suite itself is what caught it, not a second read-
+through — both the interception case and the "raise both together"
+case that actually reaches the new gap are now explicit, passing
+tests.
+
+**Course-level base, event-level override — the same shape as
+`handicap_cut_per_point`/`handicap_increase_per_point` themselves**,
+confirmed directly with the user as the intended scope (unlike
+`cutTargetOverride`, which is event-only). Every course gets its own
+value; an event's override, when set, wins; when not set, resolution
+falls through to the course's own value — never straight to the
+standard 36, so a course-level change actually takes effect for events
+that don't override it.
+
+**11 new tests** for the gate behavior specifically (on top of the 11
+already covering cutTargetOverride), covering: undefined/null parity
+with no override; the exact motivating 9-point case, both with and
+without a threshold; the gate confirmed with a non-extreme score (30);
+the exact boundary; independence from cutTargetOverride when both are
+set together; 9-hole scaling; and the raise-without-cut-target
+interception case plus its resolution when both are raised together.
+104 tests pass across the whole suite.
+
 ## Per-event cut-side Stableford target override (`0026_event_cut_target_override.sql`)
 
 A per-event override of the standard Stableford target (36 for 18

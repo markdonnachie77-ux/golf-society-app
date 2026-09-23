@@ -15,6 +15,7 @@ export interface CourseFormInitialData {
   holeCount: 9 | 18;
   handicapCutPerPoint: number;
   handicapIncreasePerPoint: number;
+  increaseThreshold: number;
   whiteCourseRating: number | null;
   whiteSlopeRating: number | null;
   yellowCourseRating: number | null;
@@ -35,6 +36,9 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
   const [cutRate, setCutRate] = React.useState(String(initial?.handicapCutPerPoint ?? "0.2"));
   const [increaseRate, setIncreaseRate] = React.useState(
     String(initial?.handicapIncreasePerPoint ?? "0.1")
+  );
+  const [increaseThreshold, setIncreaseThreshold] = React.useState(
+    String(initial?.increaseThreshold ?? "36")
   );
   const [whiteCourseRating, setWhiteCourseRating] = React.useState(
     initial?.whiteCourseRating != null ? String(initial.whiteCourseRating) : ""
@@ -89,6 +93,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
     formData.set("holeCount", String(holeCount));
     formData.set("handicapCutPerPoint", cutRate);
     formData.set("handicapIncreasePerPoint", increaseRate);
+    formData.set("increaseThreshold", increaseThreshold);
     formData.set("whiteCourseRating", whiteCourseRating);
     formData.set("whiteSlopeRating", whiteSlopeRating);
     formData.set("yellowCourseRating", yellowCourseRating);
@@ -154,6 +159,29 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
           />
           <p className="text-xs text-muted-foreground">Set to 0 for a buffered zone.</p>
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="increaseThreshold">
+          Increase threshold (Stableford points, GATE not a cap)
+        </Label>
+        {/* Same text+inputMode=decimal pattern as cutRate/increaseRate
+            above. A score must be BELOW this for the increase rate to
+            apply at all — scores at or above it get no increase, not a
+            smaller one. Defaults to 36 (today's standard target). */}
+        <Input
+          id="increaseThreshold"
+          type="text"
+          inputMode="numeric"
+          value={increaseThreshold}
+          onChange={(e) => setIncreaseThreshold(e.target.value)}
+          required
+        />
+        <p className="text-xs text-muted-foreground">
+          Standard is 36. Lowering this means a bad round (e.g. 30 points) may no longer
+          increase a handicap at all — only scores below this threshold do, and only by the
+          gap to the threshold itself, not to 36. Can be overridden per event.
+        </p>
       </div>
 
       <div>

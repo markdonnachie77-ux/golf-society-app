@@ -94,6 +94,19 @@ const eventDetailsSchema = z.object({
     .min(0, "Cut target can't be negative")
     .max(99, "That cut target looks too high")
     .nullable(),
+  // Per-event override of the course's own increase_threshold —
+  // confirmed directly with the user as a GATE, not a cap: a score at
+  // or above this gets no increase at all, not a smaller one. Same
+  // "null means use the course's value, no checkbox needed" reasoning
+  // as cutTargetOverride, and entirely independent of it — an event can
+  // set either, both, or neither, and each behaves exactly as if the
+  // other didn't exist (see proposedHandicapChange in lib/golf-math.ts).
+  increaseThresholdOverride: z
+    .number({ invalid_type_error: "Increase threshold must be a number" })
+    .int("Increase threshold must be a whole number")
+    .min(0, "Increase threshold can't be negative")
+    .max(99, "That increase threshold looks too high")
+    .nullable(),
 }).superRefine((data, ctx) => {
   if (data.overrideHandicapRates) {
     if (data.handicapCutPerPointOverride === null) {
@@ -151,6 +164,7 @@ function parseEventFormData(formData: FormData) {
       "handicapIncreasePerPointOverride"
     ),
     cutTargetOverride: parseOptionalNumberField(formData, "cutTargetOverride"),
+    increaseThresholdOverride: parseOptionalNumberField(formData, "increaseThresholdOverride"),
   });
 }
 
@@ -189,6 +203,7 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       handicap_cut_per_point: data.handicapCutPerPointOverride,
       handicap_increase_per_point: data.handicapIncreasePerPointOverride,
       cut_target_override: data.cutTargetOverride,
+      increase_threshold_override: data.increaseThresholdOverride,
       status: "draft",
       created_by: session.playerId,
       society_id: societyId,
@@ -247,6 +262,7 @@ export async function updateEvent(eventId: string, formData: FormData): Promise<
       handicap_cut_per_point: data.handicapCutPerPointOverride,
       handicap_increase_per_point: data.handicapIncreasePerPointOverride,
       cut_target_override: data.cutTargetOverride,
+      increase_threshold_override: data.increaseThresholdOverride,
       updated_at: new Date().toISOString(),
     })
     .eq("id", eventId)
@@ -431,6 +447,7 @@ export interface EventDetail {
   handicapCutPerPointOverride: number | null;
   handicapIncreasePerPointOverride: number | null;
   cutTargetOverride: number | null;
+  increaseThresholdOverride: number | null;
   leaderboardConfirmedAt: string | null;
   winnerPlayerId: string | null;
   winnerPlayerName: string | null;
@@ -465,7 +482,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
   const { data: event, error } = await supabase
     .from("events")
     .select(
-      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, deposit_gbp, remaining_balance_gbp, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, cut_target_override, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
+      "id, name, event_date, first_tee_time, capacity, self_registration_enabled, status, format, handicap_cut_for_winner, uses_competition_handicap_index, tee_color, deposit_gbp, remaining_balance_gbp, override_handicap_rates, handicap_cut_per_point, handicap_increase_per_point, cut_target_override, increase_threshold_override, leaderboard_confirmed_at, winner_player_id, course_id, courses(name, white_course_rating, white_slope_rating, yellow_course_rating, yellow_slope_rating), winner:players!events_winner_player_id_fkey(first_name, last_name)"
     )
     .eq("id", eventId)
     .eq("society_id", societyId)
@@ -532,6 +549,7 @@ export async function getEventDetail(eventId: string): Promise<EventDetail | nul
     handicapCutPerPointOverride: event.handicap_cut_per_point,
     handicapIncreasePerPointOverride: event.handicap_increase_per_point,
     cutTargetOverride: event.cut_target_override,
+    increaseThresholdOverride: event.increase_threshold_override,
     leaderboardConfirmedAt: event.leaderboard_confirmed_at,
     winnerPlayerId: event.winner_player_id,
     winnerPlayerName: winner ? `${winner.first_name} ${winner.last_name}` : null,

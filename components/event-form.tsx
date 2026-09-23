@@ -24,6 +24,7 @@ export interface EventFormInitialData {
   handicapCutPerPointOverride: number | null;
   handicapIncreasePerPointOverride: number | null;
   cutTargetOverride: number | null;
+  increaseThresholdOverride: number | null;
 }
 
 interface EventFormProps {
@@ -78,6 +79,9 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
   const [cutTargetOverride, setCutTargetOverride] = React.useState(
     initial?.cutTargetOverride != null ? String(initial.cutTargetOverride) : ""
   );
+  const [increaseThresholdOverride, setIncreaseThresholdOverride] = React.useState(
+    initial?.increaseThresholdOverride != null ? String(initial.increaseThresholdOverride) : ""
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState(false);
@@ -105,6 +109,7 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
     formData.set("handicapCutPerPointOverride", handicapCutPerPointOverride);
     formData.set("handicapIncreasePerPointOverride", handicapIncreasePerPointOverride);
     formData.set("cutTargetOverride", cutTargetOverride);
+    formData.set("increaseThresholdOverride", increaseThresholdOverride);
 
     const result = await onSubmit(formData);
     if (!result.ok) {
@@ -415,13 +420,39 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
           disabled={pending}
         />
         <p className="text-xs text-muted-foreground">
-          Cutting only — increasing a handicap always uses the standard 36 (18 for 9 holes),
-          unaffected by this setting. If you lower this below 36, any score above it is cut
-          instead of increased — for example, with 33 set, a score of 34 is cut, not increased,
-          even though 34 is below 36.
+          Cutting only — doesn&apos;t affect increasing (see the separate increase threshold
+          below for that). If you lower this below 36, any score above it is cut instead of
+          increased — for example, with 33 set, a score of 34 is cut, not increased, even
+          though 34 is below 36.
         </p>
         {fieldErrors.cutTargetOverride && (
           <p className="text-sm text-destructive">{fieldErrors.cutTargetOverride}</p>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="increaseThresholdOverride">Increase threshold override (Stableford points)</Label>
+        {/* Same shape as cutTargetOverride above, entirely independent
+            of it — GATE, not a cap. A score must be below this for the
+            increase rate to apply at all. Empty means "use the
+            course's own increase_threshold value". */}
+        <Input
+          id="increaseThresholdOverride"
+          type="text"
+          inputMode="numeric"
+          placeholder="e.g. 20 — leave blank to use the course's own setting"
+          value={increaseThresholdOverride}
+          onChange={(e) => setIncreaseThresholdOverride(e.target.value)}
+          disabled={pending}
+        />
+        <p className="text-xs text-muted-foreground">
+          Increasing only — doesn&apos;t affect cutting. A score must be below this for a
+          handicap to increase at all — scores at or above it get NO increase, not a smaller
+          one. For example, with 20 set, a score of 30 gets no increase at all, even though
+          it&apos;s well below the standard 36.
+        </p>
+        {fieldErrors.increaseThresholdOverride && (
+          <p className="text-sm text-destructive">{fieldErrors.increaseThresholdOverride}</p>
         )}
       </div>
 

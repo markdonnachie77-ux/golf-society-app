@@ -88,6 +88,7 @@ export interface Database {
           hole_count: 9 | 18;
           handicap_cut_per_point: number;
           handicap_increase_per_point: number;
+          increase_threshold: number;
           white_course_rating: number | null;
           white_slope_rating: number | null;
           yellow_course_rating: number | null;
@@ -102,6 +103,7 @@ export interface Database {
           hole_count?: 9 | 18;
           handicap_cut_per_point?: number;
           handicap_increase_per_point?: number;
+          increase_threshold?: number;
           white_course_rating?: number | null;
           white_slope_rating?: number | null;
           yellow_course_rating?: number | null;
@@ -383,6 +385,7 @@ export interface Database {
           handicap_cut_per_point: number | null;
           handicap_increase_per_point: number | null;
           cut_target_override: number | null;
+          increase_threshold_override: number | null;
           leaderboard_confirmed_at: string | null;
           leaderboard_confirmed_by: string | null;
           winner_player_id: string | null;
@@ -410,6 +413,7 @@ export interface Database {
           handicap_cut_per_point?: number | null;
           handicap_increase_per_point?: number | null;
           cut_target_override?: number | null;
+          increase_threshold_override?: number | null;
           leaderboard_confirmed_at?: string | null;
           leaderboard_confirmed_by?: string | null;
           winner_player_id?: string | null;

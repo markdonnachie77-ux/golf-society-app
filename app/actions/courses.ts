@@ -20,6 +20,16 @@ const courseDetailsSchema = z.object({
     .number({ invalid_type_error: "Increase rate must be a number" })
     .min(0, "Increase rate can't be negative")
     .max(9.99, "Increase rate looks too high"),
+  // GATE, not a cap — confirmed directly with the user. A score must be
+  // below this for the increase rate to apply at all; scores at or
+  // above it get no increase, not a smaller one. Defaults to 36
+  // (today's standard target) so every existing course behaves exactly
+  // as before until an admin deliberately changes it.
+  increaseThreshold: z
+    .number({ invalid_type_error: "Increase threshold must be a number" })
+    .int("Increase threshold must be a whole number")
+    .min(0, "Increase threshold can't be negative")
+    .max(99, "That increase threshold looks too high"),
   // All four nullable — an admin may not have these figures to hand yet
   // (they come from the course's official rating card, not something
   // typed from memory). null coming through as NaN from an empty form
@@ -80,6 +90,7 @@ function parseCourseFormData(formData: FormData) {
     holeCount: holeCountRaw,
     handicapCutPerPoint: Number(formData.get("handicapCutPerPoint")),
     handicapIncreasePerPoint: Number(formData.get("handicapIncreasePerPoint")),
+    increaseThreshold: Number(formData.get("increaseThreshold") || 36),
     whiteCourseRating: parseOptionalNumberField(formData, "whiteCourseRating"),
     whiteSlopeRating: parseOptionalNumberField(formData, "whiteSlopeRating"),
     yellowCourseRating: parseOptionalNumberField(formData, "yellowCourseRating"),
@@ -130,6 +141,7 @@ export async function createCourse(formData: FormData): Promise<ActionResult> {
       hole_count: details.holeCount,
       handicap_cut_per_point: details.handicapCutPerPoint,
       handicap_increase_per_point: details.handicapIncreasePerPoint,
+      increase_threshold: details.increaseThreshold,
       white_course_rating: details.whiteCourseRating,
       white_slope_rating: details.whiteSlopeRating,
       yellow_course_rating: details.yellowCourseRating,
@@ -204,6 +216,7 @@ export async function updateCourse(courseId: string, formData: FormData): Promis
       hole_count: details.holeCount,
       handicap_cut_per_point: details.handicapCutPerPoint,
       handicap_increase_per_point: details.handicapIncreasePerPoint,
+      increase_threshold: details.increaseThreshold,
       white_course_rating: details.whiteCourseRating,
       white_slope_rating: details.whiteSlopeRating,
       yellow_course_rating: details.yellowCourseRating,
@@ -285,7 +298,7 @@ export async function listCourses() {
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("courses")
-    .select("id, name, location, hole_count, handicap_cut_per_point, handicap_increase_per_point")
+    .select("id, name, location, hole_count, handicap_cut_per_point, handicap_increase_per_point, increase_threshold")
     .eq("society_id", societyId)
     .order("name", { ascending: true });
 

@@ -353,3 +353,93 @@ describe("proposedHandicapChange — cutTargetOverride", () => {
     expect(proposedHandicapChange(14, "front_9", standardCourse, 33)).toBeCloseTo(0.4);
   });
 });
+
+describe("proposedHandicapChange — increaseTarget (gate, not cap)", () => {
+  const standardCourse = { handicapCutPerPoint: 0.2, handicapIncreasePerPoint: 0.1 };
+
+  it("undefined/null increaseTarget behaves identically to no override at all", () => {
+    const withUndefined = proposedHandicapChange(9, "full_18", standardCourse, null, undefined);
+    const withNull = proposedHandicapChange(9, "full_18", standardCourse, null, null);
+    const withoutParam = proposedHandicapChange(9, "full_18", standardCourse);
+    expect(withUndefined).toBe(withoutParam);
+    expect(withNull).toBe(withoutParam);
+  });
+
+  it("the exact motivating case: a very low score (9) increases by the full gap to 36 with no threshold set", () => {
+    // Confirms the ORIGINAL problem this feature addresses is still the
+    // default, unmodified behavior when no threshold is configured —
+    // 36 - 9 = 27 -> 27 * 0.1
+    expect(proposedHandicapChange(9, "full_18", standardCourse)).toBeCloseTo(2.7);
+  });
+
+  it("with a threshold of 20, that same score of 9 increases by the smaller gap to 20, not to 36", () => {
+    // 20 - 9 = 11 -> 11 * 0.1, not 27 * 0.1
+    expect(proposedHandicapChange(9, "full_18", standardCourse, null, 20)).toBeCloseTo(1.1);
+  });
+
+  it("GATE confirmed directly with the user: a mediocre-but-not-extreme score (30) gets NO increase at all once the threshold is 20 — not a smaller increase, none", () => {
+    // 30 is not < 20, so no increase fires at all. Without the
+    // threshold this would have been (36-30)*0.1 = 0.6 — confirming the
+    // gate actually changes behavior here, not just for extreme scores.
+    expect(proposedHandicapChange(30, "full_18", standardCourse, null, 20)).toBe(0);
+  });
+
+  it("exactly at the threshold does not increase (strict inequality, same convention as the standard target)", () => {
+    expect(proposedHandicapChange(20, "full_18", standardCourse, null, 20)).toBe(0);
+  });
+
+  it("a score just below the threshold does increase, by the small gap to the threshold", () => {
+    // 19 < 20 -> (20-19)*0.1
+    expect(proposedHandicapChange(19, "full_18", standardCourse, null, 20)).toBeCloseTo(0.1);
+  });
+
+  it("is completely independent of cutTargetOverride — setting one does not affect the other's behavior", () => {
+    // Cut target lowered to 33 AND increase threshold lowered to 20,
+    // together. Score 25: not > 33 (no cut), not < 20 (no increase
+    // either, gated) -> 0. Neither override interferes with the other.
+    expect(proposedHandicapChange(25, "full_18", standardCourse, 33, 20)).toBe(0);
+    // Score 40 with both overrides set -> still cut normally, using
+    // cutTarget=33, completely unaffected by increaseTarget=20 being set.
+    // diff = 40-33=7 -> -(7*0.2)
+    expect(proposedHandicapChange(40, "full_18", standardCourse, 33, 20)).toBeCloseTo(-1.4);
+    // Score 15 with both set -> still increases normally using
+    // increaseTarget=20, completely unaffected by cutTarget=33 being set.
+    // diff = 20-15=5 -> 5*0.1
+    expect(proposedHandicapChange(15, "full_18", standardCourse, 33, 20)).toBeCloseTo(0.5);
+  });
+
+  it("scales the threshold proportionally for a 9-hole round, same ratio as cutTargetOverride's own scaling", () => {
+    // Threshold 20 at 18-hole scale -> scaled to 10 for a 9-hole round.
+    // Score 8 on the front 9: 8 < 10 -> (10-8)*0.1
+    expect(proposedHandicapChange(8, "front_9", standardCourse, null, 20)).toBeCloseTo(0.2);
+  });
+
+  it("a 9-hole score between the scaled threshold and the scaled standard target (18) gets no increase, matching the gate behavior at full scale", () => {
+    // Threshold 20 -> scaled to 10 for 9 holes. Score 14: not < 10 (no
+    // increase, gated) even though 14 < 18 (the standard 9-hole target).
+    expect(proposedHandicapChange(14, "front_9", standardCourse, null, 20)).toBe(0);
+  });
+
+  it("raising the threshold above 36 alone has NO effect on any score, since the cut check (still at standard 36) intercepts everything above 36 first", () => {
+    // Threshold raised to 40, but cutTargetOverride is null so the cut
+    // target stays at the standard 36. Score 38 is above 36, so the CUT
+    // check fires first and the increase check (which would have used
+    // the raised 40) never even runs. This is a real, non-obvious
+    // consequence of "cut checked first" — raising increaseTarget only
+    // has an effect if cutTarget is ALSO raised to match, otherwise the
+    // gap between 36 and the raised threshold is unreachable, always
+    // claimed by the cut side first.
+    // diff = 38-36=2 -> -(2*0.2), the ordinary cut, unaffected by the
+    // increase threshold having been raised.
+    expect(proposedHandicapChange(38, "full_18", standardCourse, null, 40)).toBeCloseTo(-0.4);
+  });
+
+  it("raising BOTH thresholds together does let a score in the new gap increase, confirming the interception above is about the cut target specifically, not a general limitation", () => {
+    // Both cutTarget and increaseTarget raised to 40 together. Score 38
+    // is no longer above the (now-raised) cut target, so it reaches the
+    // increase check, which uses the equally-raised 40.
+    // diff = 40-38=2 -> 2*0.1
+    expect(proposedHandicapChange(38, "full_18", standardCourse, 40, 40)).toBeCloseTo(0.2);
+  });
+});
+

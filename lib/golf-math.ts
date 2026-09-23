@@ -239,30 +239,38 @@ export interface CourseRates {
  * beat the course), positive = handicap increases.
  *
  * `cutTargetOverride`, when provided, replaces the standard target
- * (36/18) as the threshold for the CUT side only — the increase side
- * always uses the standard target, never this override. This is an
- * explicit, confirmed-directly-with-the-user design, not a symmetric
- * "shift both thresholds" feature: an event might set this to 33 so
- * that anyone scoring over 33 gets cut, while a score of, say, 30 still
- * increases based on the standard 36, completely unaware the cut
- * threshold was ever touched.
+ * (36/18) as the threshold for the CUT side only. `increaseTarget`,
+ * separately, replaces the standard target for the INCREASE side only.
+ * These are two entirely independent parameters — neither one's
+ * presence or absence affects how the other behaves — confirmed
+ * directly with the user across two separate features (cutTargetOverride
+ * from the cut-side request, increaseTarget from this one), not a single
+ * symmetric "shift both thresholds together" setting.
  *
- * This creates a genuine, intentional asymmetry once the override
- * differs from the standard target, resolved by priority, not by two
- * independent checks that could both fire for the same round: the cut
- * check runs first, so a score that clears the (possibly lowered) cut
- * threshold is always cut — even if, under the old single-target
- * system, that same score would have been below the standard target
- * and looked increase-eligible. Only once the cut check doesn't fire
- * does the (always-standard) increase check even run. Concretely, with
- * a lowered override of 33: scoring 34 is cut (34 > 33), never
- * increased, even though 34 < 36 — confirmed directly with the user as
- * the intended behavior, not an edge case to guard against.
+ * `increaseTarget` is a GATE, not a cap, confirmed directly with the
+ * user via a concrete before/after example: once set below the standard
+ * target, a score ABOVE the new threshold gets NO increase at all — not
+ * a smaller one. Only scores below the threshold increase, and only by
+ * the gap to the threshold itself, not to 36. Setting this to 20 means a
+ * 30-point round (mediocre, not extreme) no longer increases a handicap
+ * at all, where it used to increase a little — this is the explicitly
+ * confirmed, intended behavior, not a side effect to guard against. This
+ * directly addresses a real problem observed in actual use: a very low,
+ * possibly deliberate score (e.g. 9 points) no longer produces a large
+ * increase based on the full gap to 36, once a course or event sets a
+ * lower threshold.
  *
- * Expressed at the full-18-hole scale (e.g. 33, comparable to the
- * standard 36) — scaled proportionally for a 9-hole round, same ratio
- * as the standard target's own 36→18 scaling, so an event's override
- * means the same relative thing regardless of round type.
+ * The two overrides compose correctly without needing special-case
+ * logic for their interaction: the cut check still runs first (using
+ * cutTarget), and only when it doesn't fire does the increase check run
+ * (using increaseTarget) — exactly the same priority structure
+ * cutTargetOverride alone already established, now just with both sides
+ * independently configurable instead of only one.
+ *
+ * Both parameters are expressed at the full-18-hole scale (e.g. 33 or
+ * 20, comparable to the standard 36) — each scaled proportionally for a
+ * 9-hole round, same ratio as the standard target's own 36→18 scaling,
+ * independently of each other.
  *
  * Rounded to 2 decimal places (matches the `numeric(4,2)` column) using
  * round-half-away-from-zero on cents to avoid binary float artifacts like
@@ -272,17 +280,20 @@ export function proposedHandicapChange(
   totalStablefordPoints: number,
   roundType: RoundType,
   course: CourseRates,
-  cutTargetOverride?: number | null
+  cutTargetOverride?: number | null,
+  increaseTarget?: number | null
 ): number {
   const standardTarget = targetStablefordPoints(roundType);
   const cutTarget =
     cutTargetOverride != null ? cutTargetOverride * (standardTarget / 36) : standardTarget;
+  const resolvedIncreaseTarget =
+    increaseTarget != null ? increaseTarget * (standardTarget / 36) : standardTarget;
 
   let change: number;
   if (totalStablefordPoints > cutTarget) {
     change = -((totalStablefordPoints - cutTarget) * course.handicapCutPerPoint);
-  } else if (totalStablefordPoints < standardTarget) {
-    change = (standardTarget - totalStablefordPoints) * course.handicapIncreasePerPoint;
+  } else if (totalStablefordPoints < resolvedIncreaseTarget) {
+    change = (resolvedIncreaseTarget - totalStablefordPoints) * course.handicapIncreasePerPoint;
   } else {
     change = 0;
   }

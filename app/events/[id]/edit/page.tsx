@@ -54,6 +54,7 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
                 handicapCutPerPointOverride: event.handicapCutPerPointOverride,
                 handicapIncreasePerPointOverride: event.handicapIncreasePerPointOverride,
                 cutTargetOverride: event.cutTargetOverride,
+                increaseThresholdOverride: event.increaseThresholdOverride,
               }}
               courses={courses}
             />

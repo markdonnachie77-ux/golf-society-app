@@ -38,6 +38,7 @@ export default async function EditCoursePage({ params }: { params: Promise<{ id:
                 holeCount: course.hole_count as 9 | 18,
                 handicapCutPerPoint: course.handicap_cut_per_point,
                 handicapIncreasePerPoint: course.handicap_increase_per_point,
+                increaseThreshold: course.increase_threshold,
                 whiteCourseRating: course.white_course_rating,
                 whiteSlopeRating: course.white_slope_rating,
                 yellowCourseRating: course.yellow_course_rating,
