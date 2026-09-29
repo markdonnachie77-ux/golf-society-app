@@ -89,6 +89,7 @@ export interface Database {
           handicap_cut_per_point: number;
           handicap_increase_per_point: number;
           increase_threshold: number;
+          cut_target: number;
           white_course_rating: number | null;
           white_slope_rating: number | null;
           yellow_course_rating: number | null;
@@ -104,6 +105,7 @@ export interface Database {
           handicap_cut_per_point?: number;
           handicap_increase_per_point?: number;
           increase_threshold?: number;
+          cut_target?: number;
           white_course_rating?: number | null;
           white_slope_rating?: number | null;
           yellow_course_rating?: number | null;

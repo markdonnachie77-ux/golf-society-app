@@ -417,12 +417,15 @@ export function EventForm({ initial, courses, onSubmit, submitLabel }: EventForm
         {/* Independent of the checkbox above — this can be set whether
             or not the rate override is on, since it changes WHEN a cut
             applies, not the rate used once it does. Empty means "use
-            the standard 36 (18 for a 9-hole round)". */}
+            the course's own cut_target value" (0028) — NOT the
+            hardcoded standard 36 directly, brought in line with
+            increaseThresholdOverride below per the user's explicit
+            follow-up request. */}
         <Input
           id="cutTargetOverride"
           type="text"
           inputMode="numeric"
-          placeholder="e.g. 33 — leave blank for the standard 36"
+          placeholder="e.g. 33 — leave blank to use the course's own setting"
           value={cutTargetOverride}
           onChange={(e) => setCutTargetOverride(e.target.value)}
           disabled={pending}

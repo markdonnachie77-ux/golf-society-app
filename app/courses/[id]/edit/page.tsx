@@ -39,6 +39,7 @@ export default async function EditCoursePage({ params }: { params: Promise<{ id:
                 handicapCutPerPoint: course.handicap_cut_per_point,
                 handicapIncreasePerPoint: course.handicap_increase_per_point,
                 increaseThreshold: course.increase_threshold,
+                cutTarget: course.cut_target,
                 whiteCourseRating: course.white_course_rating,
                 whiteSlopeRating: course.white_slope_rating,
                 yellowCourseRating: course.yellow_course_rating,

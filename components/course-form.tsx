@@ -16,6 +16,7 @@ export interface CourseFormInitialData {
   handicapCutPerPoint: number;
   handicapIncreasePerPoint: number;
   increaseThreshold: number;
+  cutTarget: number;
   whiteCourseRating: number | null;
   whiteSlopeRating: number | null;
   yellowCourseRating: number | null;
@@ -40,6 +41,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
   const [increaseThreshold, setIncreaseThreshold] = React.useState(
     String(initial?.increaseThreshold ?? "36")
   );
+  const [cutTarget, setCutTarget] = React.useState(String(initial?.cutTarget ?? "36"));
   const [whiteCourseRating, setWhiteCourseRating] = React.useState(
     initial?.whiteCourseRating != null ? String(initial.whiteCourseRating) : ""
   );
@@ -94,6 +96,7 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
     formData.set("handicapCutPerPoint", cutRate);
     formData.set("handicapIncreasePerPoint", increaseRate);
     formData.set("increaseThreshold", increaseThreshold);
+    formData.set("cutTarget", cutTarget);
     formData.set("whiteCourseRating", whiteCourseRating);
     formData.set("whiteSlopeRating", whiteSlopeRating);
     formData.set("yellowCourseRating", yellowCourseRating);
@@ -192,6 +195,37 @@ export function CourseForm({ initial, onSubmit, submitLabel }: CourseFormProps) 
               {" "}
               For this 9-hole course, that&apos;s an effective threshold of{" "}
               {Number(increaseThreshold) / 2}.
+            </>
+          )}
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="cutTarget">Cut target (Stableford points)</Label>
+        {/* Mirrors increaseThreshold above exactly, brought in line per
+            the user's explicit follow-up request. A score above this
+            gets cut — no GATE-vs-cap ambiguity here, since cutting has
+            always compared against a single threshold (unlike
+            increasing, which needed the gate distinction). Same
+            full-18-hole-scale storage and 9-hole scaling as
+            increaseThreshold and every other override in this app. */}
+        <Input
+          id="cutTarget"
+          type="text"
+          inputMode="numeric"
+          value={cutTarget}
+          onChange={(e) => setCutTarget(e.target.value)}
+          required
+        />
+        <p className="text-xs text-muted-foreground">
+          Standard is 36. Lowering this means scores that used to be treated as ordinary
+          now get cut instead — for example, at 33, a score of 34 is cut, not left alone. Can
+          be overridden per event.
+          {holeCount === 9 && Number.isFinite(Number(cutTarget)) && (
+            <>
+              {" "}
+              For this 9-hole course, that&apos;s an effective target of {Number(cutTarget) / 2}
+              .
             </>
           )}
         </p>

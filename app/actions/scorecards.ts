@@ -165,19 +165,21 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   let increasePerPointOverride: number | null = null;
   // Independent of override_handicap_rates above — an event can set a
   // custom cut-side Stableford target without touching the course's own
-  // rates at all, or vice versa. Null means "use the standard 36/18
-  // target", passed straight through to proposedHandicapChange's own
-  // cutTargetOverride parameter, which is where the actual "cut wins in
-  // the gap, increase stays anchored to standard" logic lives.
+  // rates at all, or vice versa. Null means "use the course's own
+  // cut_target value" (0028), which itself defaults to 36 at the
+  // database level — NOT straight to the hardcoded standard, brought in
+  // line with increaseTargetOverride below per the user's explicit
+  // follow-up request. Passed, once resolved against the course's
+  // value, to proposedHandicapChange's own cutTargetOverride parameter,
+  // which is where the actual "cut wins in the gap" logic lives.
   let cutTargetOverride: number | null = null;
-  // Same shape as cutTargetOverride, entirely independent of it — an
-  // event overriding the increase threshold has no bearing on the cut
-  // side, and vice versa (see proposedHandicapChange's own doc comment
-  // in lib/golf-math.ts for the full reasoning). Unlike cutTargetOverride,
-  // null here does NOT mean "use the standard 36/18" directly — it means
-  // "use the course's own increase_threshold value", which itself
-  // defaults to 36 at the database level, so the end result for an
-  // untouched course is identical either way.
+  // Identical shape to cutTargetOverride now, entirely independent of
+  // it — an event overriding the increase threshold has no bearing on
+  // the cut side, and vice versa (see proposedHandicapChange's own doc
+  // comment in lib/golf-math.ts for the full reasoning). Null means "use
+  // the course's own increase_threshold value", which itself defaults
+  // to 36 at the database level, so the end result for an untouched
+  // course is identical either way.
   let increaseTargetOverride: number | null = null;
 
   if (eventIdRaw) {
@@ -303,7 +305,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   // use their rates/hole layout."
   const { data: course, error: courseError } = await supabase
     .from("courses")
-    .select("id, hole_count, handicap_cut_per_point, handicap_increase_per_point, increase_threshold")
+    .select("id, hole_count, handicap_cut_per_point, handicap_increase_per_point, increase_threshold, cut_target")
     .eq("id", courseId)
     .eq("society_id", societyId)
     .single();
@@ -352,11 +354,12 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
   });
 
   const { holeResults, summary } = computeRound(holeInputs, playingHandicap, roundType);
-  // increaseTargetOverride is null unless an event explicitly set one —
-  // course.increase_threshold always has a concrete value (defaults to
-  // 36 at the database level for every course), so this resolution
-  // always lands on a real number either way, never silently falling
-  // through further than the course's own setting.
+  // Both overrides resolve identically now: null unless an event
+  // explicitly set one, falling back to the course's own value (which
+  // always has a concrete default of 36) — brought in line per the
+  // user's explicit follow-up request, so cutTargetOverride and
+  // increaseTargetOverride behave the same shape, not one falling back
+  // to a course value and the other straight to the hardcoded standard.
   const change = proposedHandicapChange(
     summary.totalStablefordPoints,
     roundType,
@@ -364,7 +367,7 @@ export async function createScorecard(formData: FormData): Promise<ActionResult>
       handicapCutPerPoint: cutPerPointOverride ?? course.handicap_cut_per_point,
       handicapIncreasePerPoint: increasePerPointOverride ?? course.handicap_increase_per_point,
     },
-    cutTargetOverride,
+    cutTargetOverride ?? course.cut_target,
     increaseTargetOverride ?? course.increase_threshold
   );
 

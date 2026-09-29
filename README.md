@@ -1319,6 +1319,44 @@ column and long/wrapping names both present: 22 total rows still fits
 on one page, 23 still tips to two, in every case tested. The existing
 `MAX_TOTAL_ROWS = 22` ceiling needed no change.
 
+## Cut target brought in line with increase threshold (`0028_course_cut_target.sql`)
+
+`courses.cut_target` (defaults to 36, mirroring `increase_threshold`
+exactly) — confirmed directly with the user as an explicit follow-up:
+bring the cut side into the same course-default-plus-event-override
+shape the increase side already has, rather than leave the two
+asymmetric. Before this, `events.cut_target_override` (0026) was the
+only place a cut target could be set at all; now it's genuinely an
+*override* of a real course-level setting, not the sole source of
+truth with a hardcoded standard as its only fallback.
+
+**No schema change needed for `events.cut_target_override` itself** —
+only its *meaning* when null shifted, from "use the standard 36" to
+"use the course's own `cut_target`" (which itself defaults to 36, so
+an untouched course's behavior is identical either way). That
+resolution — `cutTargetOverride ?? course.cut_target` — now happens in
+`createScorecard`, exactly mirroring how `increaseTargetOverride ??
+course.increase_threshold` already worked; `proposedHandicapChange`
+itself needed zero changes, the same way it needed none when the
+increase side was added — it's always taken an already-resolved value,
+agnostic to whether that value came from an event override or a course
+default.
+
+**Verified the actual behavior change directly**, not just the
+unchanged cases: an event with no override, on a course whose
+`cut_target` has been changed away from the default, now correctly
+uses the course's value — not silently falling through to the
+hardcoded 36 the way it would have before this migration. That's the
+one genuinely new code path; the "untouched course, no override"
+case was re-verified too, confirming it's unchanged.
+
+**Course form gets a mirrored "Cut target" field**, identical shape to
+"Increase threshold" including the dynamic 9-hole scaling note added
+in the previous change — and the event form's existing "Cut target
+override" field's helper text and placeholder were updated to reflect
+the changed empty-value meaning, rather than left describing behavior
+that no longer matches what the code does.
+
 ## Increase/cut threshold fields now show their effective 9-hole value
 
 Small UX gap the user caught directly from a screenshot of a 9-hole
