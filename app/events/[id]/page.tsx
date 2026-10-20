@@ -11,6 +11,7 @@ import {
   AdminRemoveRegistrationButton,
 } from "@/components/admin-event-registration-manager";
 import { AdminEventStatusActions } from "@/components/admin-event-status-actions";
+import { CopyEventLinkButton } from "@/components/copy-event-link-button";
 import { ConfirmLeaderboardButton } from "@/components/confirm-leaderboard-button";
 import { EVENT_FORMAT_LABEL } from "@/lib/event-format";
 
@@ -110,6 +111,9 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
                   >
                     Download sign-up sheet
                   </a>
+                )}
+                {event.status === "published" && (
+                  <CopyEventLinkButton eventId={event.id} />
                 )}
               </div>
             </CardContent>

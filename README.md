@@ -1819,6 +1819,22 @@ the built-in palette's own values, so the built-in "clubhouse ledger"
 theme in `globals.css` keeps being the single source of truth for
 societies that never touch this setting.
 
+## Copy Link button on the event page
+
+Next to "Download sign-up sheet" in the admin card, published events show
+a "Copy Link" button that puts the event's URL on the clipboard, so an
+admin on a phone can paste it straight into a text message
+(`components/copy-event-link-button.tsx`). The URL is built from
+`window.location.origin` plus `/events/<id>`, so it is automatically
+correct for whichever society domain the admin is on. It uses
+`navigator.clipboard.writeText`, falling back to a hidden textarea and
+`execCommand("copy")` where the Clipboard API is unavailable (older
+browsers, non-secure contexts). The button briefly reads "Link copied ✓",
+or shows a short message if copying fails. Like the PDF link, it is hidden
+for drafts, since a draft's URL is invisible to everyone but admins.
+Anyone opening the link while logged out is sent to login and returned to
+the event afterwards. No migration or new dependency.
+
 ## Admins logging a round on behalf of a player
 
 `/rounds/new` shows an extra "Log this round for" picker, admin-only —
